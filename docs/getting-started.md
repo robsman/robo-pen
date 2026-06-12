@@ -41,19 +41,15 @@ just build
 
 That means: open your terminal, type `just build`, and press Enter.
 
-### Docker and Containers
+### Apple Container and Containers
 
 A **container** is like a lightweight virtual computer running inside your real computer. It has its own operating system (Linux), its own installed programs, and its own files. But unlike a full **virtual machine** (a complete simulated computer, which is heavy and slow to start), a container starts in seconds and uses very little memory.
 
-**Docker** is the software that creates and runs these containers. You tell Docker "here's a blueprint" (called a Dockerfile), and it builds a container from that blueprint.
+**Apple Container** is Apple's native containerization tool for macOS. It creates and runs Linux containers directly, using Apple's virtualization framework. It is OCI-compatible (it works with the same standard image format used by Docker and other container tools) and it reads regular `Dockerfile`s — so the same blueprint that builds an image for Docker also builds an image for Apple Container.
 
-You don't need to learn Docker commands — this project wraps everything in simple `just` commands for you.
+The key difference from Docker on a Mac: Docker traditionally runs **one shared Linux VM** that hosts all your containers. Apple Container instead runs **one lightweight Linux VM per container**. Each container gets its own tiny VM, which boots in a fraction of a second. This means stronger isolation between containers and no single heavyweight VM hogging resources in the background.
 
-### Colima
-
-Docker normally requires "Docker Desktop," which is a large commercial application. **Colima** is a free, lightweight alternative that runs Docker on your Mac. Our setup script installs it for you.
-
-Behind the scenes, Colima creates a small Linux virtual machine (a simulated computer) on your Mac, and Docker runs inside that. You'll never need to interact with Colima directly after the initial setup.
+You don't need to learn the `container` CLI directly — this project wraps everything in simple `just` commands for you.
 
 ### Justfile and `just`
 
@@ -87,7 +83,7 @@ There are two ways to use Claude Code:
 
 ## What You Need Before Starting
 
-1. **A Mac** with Apple Silicon (M1/M2/M3/M4). Intel Macs may work but require manual Colima configuration — see Troubleshooting.
+1. **A Mac with Apple Silicon** (M1 or newer) running **macOS 26 or later**. Apple Container requires Apple Silicon and a recent macOS release; Intel Macs are not supported.
 2. **Homebrew** — a package manager for Mac. If you don't have it, open Terminal and paste:
    ```bash
    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
@@ -97,7 +93,11 @@ There are two ways to use Claude Code:
    ```bash
    brew install just
    ```
-4. **A Claude subscription or API key** — either a [Claude Pro/Max subscription](https://claude.ai) or an [Anthropic API key](https://console.anthropic.com/) (Settings > API Keys). You only need one.
+4. **jq** — a small JSON parser used by the Justfile to detect container state. `just setup` installs it for you, but if you skip `just setup` you'll need it manually:
+   ```bash
+   brew install jq
+   ```
+5. **A Claude subscription or API key** — either a [Claude Pro/Max subscription](https://claude.ai) or an [Anthropic API key](https://console.anthropic.com/) (Settings > API Keys). You only need one.
 
 ---
 
@@ -186,20 +186,20 @@ Then press `Ctrl+O` (the letter O) to save, press Enter to confirm, and `Ctrl+X`
 
 This file is private — it's listed in `.gitignore` (a special file that tells git "never upload these files"), so it will never be accidentally shared even if you publish your project.
 
-### Step 3: Install Colima and Docker
+### Step 3: Install Apple Container
 
 ```bash
 just setup
 ```
 
 **What this does:**
-1. Installs Colima (the Docker runtime) and the Docker command-line tool via Homebrew
-2. Starts a Linux virtual machine with 4 CPU cores, 8 GB of RAM, and 60 GB of disk space
-3. Configures it to use Apple's native virtualization (fast and efficient on Apple Silicon)
+1. Installs Apple Container via Homebrew (the `container` formula) — a single command-line tool, no daemon to manage
+2. Installs `jq` (used by the Justfile to parse container state)
+3. Starts the Apple Container service in the background, ready to launch per-container Linux VMs on demand
 
-This step typically takes 3-5 minutes the first time on a fast internet connection. You'll see download progress and Homebrew output scrolling by. When you see a message like `done` or your terminal prompt returns, Docker is ready.
+This step typically takes 1-2 minutes the first time on a fast internet connection. You'll see Homebrew output scrolling by. When your terminal prompt returns, Apple Container is ready.
 
-**If you see an error about Colima already running**, that's fine — it means you've done this before.
+**If you see a message that the service is already running**, that's fine — it means you've done this before.
 
 ### Step 4: Build the container image
 
@@ -207,7 +207,7 @@ This step typically takes 3-5 minutes the first time on a fast internet connecti
 just build
 ```
 
-**What this does:** Docker reads the `Dockerfile` (the blueprint) and builds an image — a snapshot of a Linux system with all the tools pre-installed. This includes:
+**What this does:** Apple Container reads the `Dockerfile` (the blueprint) and builds an image — a snapshot of a Linux system with all the tools pre-installed. This includes:
 
 - Python 3 and uv (a fast Python package manager)
 - Node.js 22 (for JavaScript)
@@ -216,7 +216,7 @@ just build
 - git, just, and build tools
 - Claude Code CLI
 
-The first build downloads a lot and takes several minutes. Future builds are much faster because Docker caches each step.
+The first build downloads a lot and takes several minutes. Future builds are much faster because each step is cached.
 
 ---
 
@@ -230,7 +230,7 @@ just create my-first-project
 
 **What this does:**
 1. Creates a folder on your Mac: `projects/my-first-project/`
-2. Creates a Docker container named `claude-my-first-project`
+2. Creates a container named `claude-my-first-project`
 3. Links the folder so the container can read and write to it
 
 The container is created but not yet running (think of it as a powered-off computer).
@@ -432,9 +432,9 @@ just cp-from my-project /home/coder/.bashrc ./container-bashrc.txt
 
 ### Advanced: Extra mounts at creation time
 
-> This section uses Docker syntax and is optional. Skip it if you're just getting started.
+> This section uses raw `container` CLI flags and is optional. Skip it if you're just getting started.
 
-If you have a large dataset somewhere else on your Mac that you don't want to copy, you can mount it as a second shared folder when creating the container. The `--` tells `just` that everything after it is extra options to pass to Docker:
+If you have a large dataset somewhere else on your Mac that you don't want to copy, you can mount it as a second shared folder when creating the container. The `--` tells `just` that everything after it is extra options to pass to the `container` CLI:
 
 ```bash
 just create my-project -- -v /Users/you/datasets:/data:ro
@@ -444,6 +444,8 @@ Breaking down `-v /Users/you/datasets:/data:ro`:
 - `/Users/you/datasets` — the folder on your Mac
 - `/data` — where it appears inside the container
 - `:ro` — "read-only," so Claude can read but not modify your original data
+
+The `container` CLI supports the familiar `-v host:container[:ro]` shorthand, which is what we use here for simplicity. If you ever need more options (custom mount type, propagation, etc.), the longer `--mount type=bind,source=...,target=...,readonly` form also works.
 
 ---
 
@@ -632,11 +634,11 @@ Run any of these from the `claude-container` directory:
 
 | Command | What It Does |
 |---------|-------------|
-| `just setup` | One-time setup: installs Colima and Docker, starts the VM |
+| `just setup` | One-time setup: installs Apple Container and starts its service |
 | `just build` | Builds the container image from the Dockerfile |
 | `just rebuild` | Rebuilds from scratch (ignoring cache). Use if the image seems broken |
 | `just create <name>` | Creates a new container and its project folder |
-| `just create <name> -- <args>` | Creates a container with extra Docker options (ports, mounts, etc.) |
+| `just create <name> -- <args>` | Creates a container with extra `container` CLI options (ports, mounts, etc.) |
 | `just login <name>` | Log in with Claude subscription (once per container) |
 | `just start <name>` | Starts a stopped container |
 | `just stop <name>` | Stops a running container (preserves state) |
@@ -652,9 +654,9 @@ Run any of these from the `claude-container` directory:
 | `just list` | Shows all claude containers and their status |
 | `just logs <name>` | Shows the container's log output |
 | `just stats` | Shows CPU/memory usage for all running containers |
-| `just colima-start` | Starts the Colima VM (if you stopped it) |
-| `just colima-stop` | Stops the Colima VM (frees all resources) |
-| `just colima-status` | Shows whether the Colima VM is running |
+| `just service-start` | Starts the Apple Container service (if you stopped it) |
+| `just service-stop` | Stops the Apple Container service (frees all resources) |
+| `just service-status` | Shows whether the Apple Container service is running |
 
 ---
 
@@ -672,17 +674,17 @@ cd /path/to/claude-container
 
 Install just: `brew install just`
 
-### "Cannot connect to the Docker daemon"
+### "Cannot connect to the container service" / commands hang
 
-Colima isn't running. Start it:
+The Apple Container service isn't running. Start it:
 
 ```bash
-just colima-start
+just service-start
 ```
 
 ### "just build" is failing or taking forever
 
-Make sure Colima is running (`just colima-status`). If the build fails on a specific step, try `just rebuild` for a clean build. Check your internet connection — the build downloads packages from the internet.
+Make sure the Apple Container service is running (`just service-status`). If the build fails on a specific step, try `just rebuild` for a clean build. Check your internet connection — the build downloads packages from the internet.
 
 ### "Container already exists"
 
@@ -720,19 +722,10 @@ just stats        # See what's using resources
 just stop <name>  # Stop idle containers
 ```
 
-Or stop Colima entirely when you're done for the day:
+Or stop the Apple Container service entirely when you're done for the day:
 
 ```bash
-just colima-stop
-```
-
-### `just setup` fails on an Intel Mac
-
-The default setup uses Apple Silicon-specific options (`--vm-type vz --vz-rosetta`). On an Intel Mac, run the setup steps manually:
-
-```bash
-brew install colima docker
-colima start --cpu 4 --memory 8 --disk 60
+just service-stop
 ```
 
 ### I want to start completely fresh
@@ -769,12 +762,11 @@ Existing containers are **not** affected — only new containers created after t
 | Term | Meaning |
 |------|---------|
 | **API key** | A secret string that authenticates you with Anthropic's servers |
+| **Apple Container** | Apple's native macOS tool for building and running OCI-compatible Linux containers. Runs one lightweight VM per container using Apple's virtualization framework |
 | **Bind mount** | A shared folder between your Mac and a container |
 | **Claude Code** | Anthropic's command-line AI coding assistant |
-| **Colima** | A free, lightweight Docker runtime for macOS |
 | **Container** | An isolated Linux environment running on your Mac |
-| **Docker** | The software that creates and manages containers |
-| **Dockerfile** | A blueprint that describes how to build a container image |
+| **Dockerfile** | A blueprint that describes how to build a container image (also read by Apple Container) |
 | **Image** | A snapshot/template used to create containers (like a class vs an instance) |
 | **Justfile** | A file containing shortcut recipes for terminal commands |
 | **Repository (repo)** | A project folder tracked by git, often hosted on GitHub |

