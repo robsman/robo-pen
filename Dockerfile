@@ -73,8 +73,8 @@ USER root
 COPY --from=ccr-fuse-build /out/ccr-fuse /usr/local/bin/ccr-fuse
 COPY config/ccr-init.sh /usr/local/bin/ccr-init.sh
 RUN chmod 0755 /usr/local/bin/ccr-fuse /usr/local/bin/ccr-init.sh \
-    && mkdir -p /var/lib/ccr/overlay /workspace /workspace-real \
-    && chown coder:coder /var/lib/ccr/overlay
+    && mkdir -p /var/lib/ccr/shadow /workspace /workspace-real \
+    && chown coder:coder /var/lib/ccr/shadow
 USER coder
 
 WORKDIR /workspace

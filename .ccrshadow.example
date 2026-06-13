@@ -1,0 +1,65 @@
+# Example .ccrshadow file.
+#
+# Copy this to .ccrshadow in any project workspace to filter paths between
+# the host and the container. ccr-fuse reads this at container start; see
+# docs/adr/0003-strict-gitignore-subset-and-ccrshadow-filename.md for the
+# rationale behind the filename and syntax.
+#
+# Syntax: strict subset of .gitignore (one pattern per line).
+#   *           any sequence of chars except '/'
+#   **          any number of path components (zero or more)
+#   ?           a single char except '/'
+#   [abc]       character class
+#   /pattern    leading slash anchors the pattern to the workspace root
+#   pattern/    trailing slash restricts the pattern to directories
+#   pattern     unanchored (no slash anywhere except trailing) matches at any depth
+#   a/b/c       any mid-pattern slash anchors to root (per .gitignore spec)
+#
+# Limitations:
+#   * No negation (`!pattern`) — silently skipped with a warning.
+#   * Lines starting with `#` are comments; inline `#` is literal.
+#   * Path traversal patterns (`..`) are rejected.
+#   * Only the workspace-root `.ccrshadow` is read; nested files are ignored.
+#
+# Semantics for every matched path:
+#   * Host's matching file/dir is INVISIBLE inside the container.
+#     stat returns ENOENT until the container writes something there.
+#   * Container creates/writes/deletes go to a container-local "shadow store"
+#     (/var/lib/ccr/shadow) — they NEVER touch the host filesystem.
+#   * The shadow store survives `ccr stop`/`start`. `ccr destroy` wipes it;
+#     host content is unaffected either way.
+#
+# Risks worth knowing (see docs/adr/0004-cross-region-rename-keeps-exdev.md):
+#   * `mv shadowed/file passthrough-name` copies container-generated content
+#     to host disk. Use `cp + rm` deliberately if you mean it.
+#
+# Two typical use cases:
+#   1. Secrets the container should not see (.env*, credentials, ssh keys).
+#   2. Build artifacts whose architecture differs from the host (node_modules,
+#      .venv, target, etc.) — the container builds its own copy.
+
+# Secrets / private files (unanchored: at any depth)
+.env.local
+.env.production
+.env.*.local
+.aws/credentials
+.ssh/id_rsa
+.ssh/id_ed25519
+
+# Build artifacts that should live only in the container
+node_modules
+.venv
+target
+.next
+dist
+__pycache__
+*.pyc
+
+# Local logs (any depth)
+*.log
+
+# A root-anchored example: hides /secret at root but NOT a/secret
+# /secret
+
+# A dir-anchored example: build/ at any depth, only directories
+# build/

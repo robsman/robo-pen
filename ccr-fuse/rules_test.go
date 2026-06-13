@@ -141,7 +141,7 @@ func TestRulesEmpty(t *testing.T) {
 }
 
 func TestRulesMissingFile(t *testing.T) {
-	r, err := ParseRulesFile("/nonexistent/.ccrignore")
+	r, err := ParseRulesFile("/nonexistent/.ccrshadow")
 	if err != nil {
 		t.Fatalf("missing file should not error: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestRulesMissingFile(t *testing.T) {
 }
 
 func TestRulesTempFile(t *testing.T) {
-	f, err := os.CreateTemp("", "ccrignore-*")
+	f, err := os.CreateTemp("", "ccrshadow-*")
 	if err != nil {
 		t.Fatal(err)
 	}

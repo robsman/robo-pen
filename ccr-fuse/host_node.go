@@ -14,11 +14,11 @@ import (
 type Config struct {
 	Rules       *Rules
 	HostRoot    *fs.LoopbackRoot
-	OverlayRoot *fs.LoopbackRoot
+	ShadowRoot *fs.LoopbackRoot
 }
 
 // HostNode is a rule-aware loopback node rooted at HostRoot.Path.
-// When a child path matches a rule it routes to OverlayRoot.
+// When a child path matches a rule it routes to ShadowRoot.
 type HostNode struct {
 	fs.LoopbackNode
 	cfg *Config
@@ -44,23 +44,23 @@ func joinRel(parent, name string) string {
 	return parent + "/" + name
 }
 
-// overlayPath returns the overlay backing path for a workspace-relative path.
-func (n *HostNode) overlayPath(rel string) string {
-	return filepath.Join(n.cfg.OverlayRoot.Path, rel)
+// shadowPath returns the shadow backing path for a workspace-relative path.
+func (n *HostNode) shadowPath(rel string) string {
+	return filepath.Join(n.cfg.ShadowRoot.Path, rel)
 }
 
-// ensureOverlayParent creates the overlay parent directory (recursively) for a
+// ensureShadowParent creates the shadow parent directory (recursively) for a
 // to-be-created rule-matched child. No-op if it already exists.
-func (n *HostNode) ensureOverlayParent(childRel string) error {
+func (n *HostNode) ensureShadowParent(childRel string) error {
 	parent := filepath.Dir(childRel)
 	if parent == "." || parent == "" {
 		return nil
 	}
-	return os.MkdirAll(n.overlayPath(parent), 0o755)
+	return os.MkdirAll(n.shadowPath(parent), 0o755)
 }
 
-func (n *HostNode) overlayChild(ctx context.Context, rel string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
-	p := n.overlayPath(rel)
+func (n *HostNode) shadowChild(ctx context.Context, rel string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	p := n.shadowPath(rel)
 	var st syscall.Stat_t
 	if err := syscall.Lstat(p, &st); err != nil {
 		return nil, fs.ToErrno(err)
@@ -68,8 +68,8 @@ func (n *HostNode) overlayChild(ctx context.Context, rel string, out *fuse.Entry
 	if out != nil {
 		out.Attr.FromStat(&st)
 	}
-	node := &fs.LoopbackNode{RootData: n.cfg.OverlayRoot}
-	ch := n.NewInode(ctx, node, idFromStat(n.cfg.OverlayRoot.Dev, &st))
+	node := &fs.LoopbackNode{RootData: n.cfg.ShadowRoot}
+	ch := n.NewInode(ctx, node, idFromStat(n.cfg.ShadowRoot.Dev, &st))
 	return ch, 0
 }
 
@@ -78,7 +78,7 @@ func (n *HostNode) overlayChild(ctx context.Context, rel string, out *fuse.Entry
 func (n *HostNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	childRel := joinRel(n.relPath(), name)
 	if n.cfg.Rules.Match(childRel) {
-		return n.overlayChild(ctx, childRel, out)
+		return n.shadowChild(ctx, childRel, out)
 	}
 	return n.LoopbackNode.Lookup(ctx, name, out)
 }
@@ -102,9 +102,9 @@ func (n *HostNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 	}
 	stream.Close()
 
-	// Merge in overlay-side entries that exist at this directory level.
-	overlayDir := n.overlayPath(parentRel)
-	if dh, err := os.Open(overlayDir); err == nil {
+	// Merge in shadow-side entries that exist at this directory level.
+	shadowDir := n.shadowPath(parentRel)
+	if dh, err := os.Open(shadowDir); err == nil {
 		names, _ := dh.Readdirnames(-1)
 		dh.Close()
 		for _, name := range names {
@@ -116,7 +116,7 @@ func (n *HostNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 				continue
 			}
 			var st syscall.Stat_t
-			if err := syscall.Lstat(filepath.Join(overlayDir, name), &st); err == nil {
+			if err := syscall.Lstat(filepath.Join(shadowDir, name), &st); err == nil {
 				entries = append(entries, fuse.DirEntry{
 					Name: name,
 					Mode: uint32(st.Mode) & syscall.S_IFMT,
@@ -128,19 +128,19 @@ func (n *HostNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 	return fs.NewListDirStream(entries), 0
 }
 
-// --- Write ops on rule-matching children: route to overlay ---
+// --- Write ops on rule-matching children: route to shadow ---
 
 func (n *HostNode) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	childRel := joinRel(n.relPath(), name)
 	if n.cfg.Rules.Match(childRel) {
-		if err := n.ensureOverlayParent(childRel); err != nil {
+		if err := n.ensureShadowParent(childRel); err != nil {
 			return nil, fs.ToErrno(err)
 		}
-		p := n.overlayPath(childRel)
+		p := n.shadowPath(childRel)
 		if err := os.Mkdir(p, os.FileMode(mode)); err != nil {
 			return nil, fs.ToErrno(err)
 		}
-		return n.overlayChild(ctx, childRel, out)
+		return n.shadowChild(ctx, childRel, out)
 	}
 	return n.LoopbackNode.Mkdir(ctx, name, mode, out)
 }
@@ -148,10 +148,10 @@ func (n *HostNode) Mkdir(ctx context.Context, name string, mode uint32, out *fus
 func (n *HostNode) Create(ctx context.Context, name string, flags uint32, mode uint32, out *fuse.EntryOut) (*fs.Inode, fs.FileHandle, uint32, syscall.Errno) {
 	childRel := joinRel(n.relPath(), name)
 	if n.cfg.Rules.Match(childRel) {
-		if err := n.ensureOverlayParent(childRel); err != nil {
+		if err := n.ensureShadowParent(childRel); err != nil {
 			return nil, nil, 0, fs.ToErrno(err)
 		}
-		p := n.overlayPath(childRel)
+		p := n.shadowPath(childRel)
 		flags &^= syscall.O_APPEND
 		fd, err := syscall.Open(p, int(flags)|os.O_CREATE, mode)
 		if err != nil {
@@ -163,8 +163,8 @@ func (n *HostNode) Create(ctx context.Context, name string, flags uint32, mode u
 			return nil, nil, 0, fs.ToErrno(err)
 		}
 		out.FromStat(&st)
-		node := &fs.LoopbackNode{RootData: n.cfg.OverlayRoot}
-		ch := n.NewInode(ctx, node, idFromStat(n.cfg.OverlayRoot.Dev, &st))
+		node := &fs.LoopbackNode{RootData: n.cfg.ShadowRoot}
+		ch := n.NewInode(ctx, node, idFromStat(n.cfg.ShadowRoot.Dev, &st))
 		return ch, fs.NewLoopbackFile(fd), 0, 0
 	}
 	return n.LoopbackNode.Create(ctx, name, flags, mode, out)
@@ -173,14 +173,14 @@ func (n *HostNode) Create(ctx context.Context, name string, flags uint32, mode u
 func (n *HostNode) Symlink(ctx context.Context, target, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	childRel := joinRel(n.relPath(), name)
 	if n.cfg.Rules.Match(childRel) {
-		if err := n.ensureOverlayParent(childRel); err != nil {
+		if err := n.ensureShadowParent(childRel); err != nil {
 			return nil, fs.ToErrno(err)
 		}
-		p := n.overlayPath(childRel)
+		p := n.shadowPath(childRel)
 		if err := syscall.Symlink(target, p); err != nil {
 			return nil, fs.ToErrno(err)
 		}
-		return n.overlayChild(ctx, childRel, out)
+		return n.shadowChild(ctx, childRel, out)
 	}
 	return n.LoopbackNode.Symlink(ctx, target, name, out)
 }
@@ -188,14 +188,14 @@ func (n *HostNode) Symlink(ctx context.Context, target, name string, out *fuse.E
 func (n *HostNode) Mknod(ctx context.Context, name string, mode, rdev uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	childRel := joinRel(n.relPath(), name)
 	if n.cfg.Rules.Match(childRel) {
-		if err := n.ensureOverlayParent(childRel); err != nil {
+		if err := n.ensureShadowParent(childRel); err != nil {
 			return nil, fs.ToErrno(err)
 		}
-		p := n.overlayPath(childRel)
+		p := n.shadowPath(childRel)
 		if err := syscall.Mknod(p, mode, int(rdev)); err != nil {
 			return nil, fs.ToErrno(err)
 		}
-		return n.overlayChild(ctx, childRel, out)
+		return n.shadowChild(ctx, childRel, out)
 	}
 	return n.LoopbackNode.Mknod(ctx, name, mode, rdev, out)
 }
@@ -203,7 +203,7 @@ func (n *HostNode) Mknod(ctx context.Context, name string, mode, rdev uint32, ou
 func (n *HostNode) Unlink(ctx context.Context, name string) syscall.Errno {
 	childRel := joinRel(n.relPath(), name)
 	if n.cfg.Rules.Match(childRel) {
-		return fs.ToErrno(syscall.Unlink(n.overlayPath(childRel)))
+		return fs.ToErrno(syscall.Unlink(n.shadowPath(childRel)))
 	}
 	return n.LoopbackNode.Unlink(ctx, name)
 }
@@ -211,7 +211,7 @@ func (n *HostNode) Unlink(ctx context.Context, name string) syscall.Errno {
 func (n *HostNode) Rmdir(ctx context.Context, name string) syscall.Errno {
 	childRel := joinRel(n.relPath(), name)
 	if n.cfg.Rules.Match(childRel) {
-		return fs.ToErrno(syscall.Rmdir(n.overlayPath(childRel)))
+		return fs.ToErrno(syscall.Rmdir(n.shadowPath(childRel)))
 	}
 	return n.LoopbackNode.Rmdir(ctx, name)
 }
@@ -232,10 +232,10 @@ func (n *HostNode) Rename(ctx context.Context, name string, newParent fs.InodeEm
 		return syscall.EXDEV
 	}
 	if srcRule {
-		if err := n.ensureOverlayParent(dstRel); err != nil {
+		if err := n.ensureShadowParent(dstRel); err != nil {
 			return fs.ToErrno(err)
 		}
-		return fs.ToErrno(syscall.Rename(n.overlayPath(srcRel), n.overlayPath(dstRel)))
+		return fs.ToErrno(syscall.Rename(n.shadowPath(srcRel), n.shadowPath(dstRel)))
 	}
 	return n.LoopbackNode.Rename(ctx, name, newParent, newName, flags)
 }

@@ -5,10 +5,10 @@ set -eu
 apk add --no-cache fuse3 >/dev/null 2>&1
 
 HOST=/host
-OVERLAY=/overlay
+SHADOW=/shadow
 MNT=/mnt
-mkdir -p "$HOST" "$OVERLAY" "$MNT"
-rm -rf "$HOST"/* "$OVERLAY"/* "$HOST"/.[!.]* "$OVERLAY"/.[!.]* 2>/dev/null || true
+mkdir -p "$HOST" "$SHADOW" "$MNT"
+rm -rf "$HOST"/* "$SHADOW"/* "$HOST"/.[!.]* "$SHADOW"/.[!.]* 2>/dev/null || true
 
 # Fixture
 mkdir -p "$HOST/.aws" "$HOST/src" "$HOST/has-symlinks"
@@ -19,7 +19,7 @@ ln -s "$HOST/.aws/credentials" "$HOST/cred-link" 2>/dev/null || true
 # A host file at a rule path that we want hidden — verify it stays hidden via symlink
 ln -s nonexistent-target "$HOST/.env.local-link" 2>/dev/null || true
 
-cat > "$HOST/.ccrignore" <<EOF
+cat > "$HOST/.ccrshadow" <<EOF
 .env.local
 node_modules
 .aws/credentials
@@ -28,7 +28,7 @@ deep/nested/secret
 .env.local-link
 EOF
 
-/tools/ccr-fuse --backing "$HOST" --overlay "$OVERLAY" --mount "$MNT" --rules "$HOST/.ccrignore" --cache 0.1 &
+/tools/ccr-fuse --backing "$HOST" --shadow "$SHADOW" --mount "$MNT" --rules "$HOST/.ccrshadow" --cache 0.1 &
 FPID=$!
 for i in 1 2 3 4 5 10; do mountpoint -q "$MNT" && break; sleep 0.2; done
 mountpoint -q "$MNT" || { echo FAIL; exit 1; }
@@ -44,24 +44,24 @@ echo "=== T10: rule path with non-existent host parent ==="
 # rule "build/output" - host has no "build" dir at all
 # ls /workspace should not show "build" (parent dir absent on host)
 ls "$MNT" 2>&1 | grep -q "^build$" && fail "T10a build should not appear in root" || pass "T10a build not in root"
-# When container creates build/, then writes build/output, it should land in overlay
+# When container creates build/, then writes build/output, it should land in shadow
 mkdir "$MNT/build"
 assert_present "$MNT/build"                  "T10b after mkdir, build/ exists in mount"
 assert_present "$HOST/build"                 "T10c host got build/ (non-rule dir; mkdir propagates)"
 echo "secret" > "$MNT/build/output"
 assert_eq "$(cat "$MNT/build/output")" "secret" "T10d build/output readable"
-assert_missing "$HOST/build/output"          "T10e host build/output stays absent (rule routed to overlay)"
-assert_present "$OVERLAY/build/output"       "T10f overlay has build/output"
+assert_missing "$HOST/build/output"          "T10e host build/output stays absent (rule routed to shadow)"
+assert_present "$SHADOW/build/output"       "T10f shadow has build/output"
 
 echo
-echo "=== T11: deeply nested rule, parents auto-created in overlay ==="
+echo "=== T11: deeply nested rule, parents auto-created in shadow ==="
 # mkdir of "deep" goes to HOST (not a rule); same for "deep/nested".
-# Only "deep/nested/secret" is a rule, routed to overlay.
+# Only "deep/nested/secret" is a rule, routed to shadow.
 mkdir -p "$MNT/deep/nested"
 echo "deep-secret" > "$MNT/deep/nested/secret"
 assert_eq "$(cat "$MNT/deep/nested/secret")" "deep-secret" "T11a deep/nested/secret read back"
 assert_missing "$HOST/deep/nested/secret"   "T11b host deep/nested/secret absent"
-assert_present "$OVERLAY/deep/nested/secret" "T11c overlay deep/nested/secret present"
+assert_present "$SHADOW/deep/nested/secret" "T11c shadow deep/nested/secret present"
 
 echo
 echo "=== T12: symlinks in passthrough ==="
@@ -79,7 +79,7 @@ echo
 echo "=== T13: a host symlink IS a rule (.env.local-link is a symlink, rule applies to it) ==="
 assert_missing "$MNT/.env.local-link"        "T13a host symlink hidden by rule"
 ln -s /elsewhere "$MNT/.env.local-link"
-assert_present "$MNT/.env.local-link"        "T13b container-created symlink visible (overlay)"
+assert_present "$MNT/.env.local-link"        "T13b container-created symlink visible (shadow)"
 new_target=$(readlink "$MNT/.env.local-link")
 assert_eq "$new_target" "/elsewhere"          "T13c readlink returns container's target"
 # Host original symlink unchanged
@@ -87,7 +87,7 @@ host_target=$(readlink "$HOST/.env.local-link")
 assert_eq "$host_target" "nonexistent-target" "T13d host symlink untouched"
 
 echo
-echo "=== T14: chmod/setattr on overlay file ==="
+echo "=== T14: chmod/setattr on shadow file ==="
 echo "x" > "$MNT/.env.local"
 chmod 600 "$MNT/.env.local"
 perm=$(stat -c '%a' "$MNT/.env.local")
@@ -97,17 +97,17 @@ perm=$(stat -c '%a' "$MNT/.env.local")
 assert_eq "$perm" "644"                       "T14b chmod 644 stuck"
 
 echo
-echo "=== T15: open-then-write existing overlay file (Open, not Create) ==="
+echo "=== T15: open-then-write existing shadow file (Open, not Create) ==="
 echo "first" > "$MNT/.env.local"
 # Now open existing with > redirection (truncate + write)
 echo "second" > "$MNT/.env.local"
-assert_eq "$(cat "$MNT/.env.local")" "second" "T15a truncate-write to existing overlay file"
+assert_eq "$(cat "$MNT/.env.local")" "second" "T15a truncate-write to existing shadow file"
 # Append
 echo "third" >> "$MNT/.env.local"
 content=$(cat "$MNT/.env.local")
 expected="second
 third"
-assert_eq "$content" "$expected"              "T15b append to existing overlay file"
+assert_eq "$content" "$expected"              "T15b append to existing shadow file"
 
 echo
 echo "=== T16: large file write/read consistency ==="
@@ -136,7 +136,7 @@ P1=$!
 P2=$!
 wait $P1 $P2
 count=$(ls "$MNT/node_modules" | grep -c "^file-")
-assert_eq "$count" "40"                       "T17a 40 concurrent files in overlay"
+assert_eq "$count" "40"                       "T17a 40 concurrent files in shadow"
 # Host should still be empty of these files
 host_count=$(ls "$HOST/node_modules" 2>/dev/null | { grep -c "^file-" || true; })
 assert_eq "$host_count" "0"                   "T17b host has no concurrent writes"
@@ -145,15 +145,15 @@ echo
 echo "=== T18: ls inside non-rule subdir with rule sibling absent ==="
 ls "$MNT/.aws" | sort > /tmp/aws-listing
 expected="config"
-# .aws/credentials is rule → hidden unless overlay has it
+# .aws/credentials is rule → hidden unless shadow has it
 got=$(cat /tmp/aws-listing | tr "\n" " " | sed "s/ $//")
 assert_eq "$got" "$expected"                  "T18a .aws shows only non-rule entries"
-# Add overlay content
+# Add shadow content
 echo "x" > "$MNT/.aws/credentials"
 sleep 0.2
 ls "$MNT/.aws" | sort > /tmp/aws-listing2
 got2=$(cat /tmp/aws-listing2 | tr "\n" " " | sed "s/ $//")
-assert_eq "$got2" "config credentials"        "T18b .aws shows credentials once overlay populated"
+assert_eq "$got2" "config credentials"        "T18b .aws shows credentials once shadow populated"
 
 echo
 echo "=== T19: rmdir empty vs non-empty ==="
