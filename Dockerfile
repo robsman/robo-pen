@@ -45,9 +45,14 @@ RUN ARCH=$(dpkg --print-architecture) \
 # ── just ─────────────────────────────────────────────────────────
 RUN curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
 
-# ── Non-root user with passwordless sudo ─────────────────────────
-RUN useradd -m -s /bin/bash -u 1000 coder \
-    && echo "coder ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/coder
+# ── Non-root user (no sudo) ──────────────────────────────────────
+# coder is intentionally unprivileged: this is what gives the shadow mechanism
+# its security boundary. With sudo, an in-container process could `umount` the
+# /workspace-real hide and bypass shadow routing. See
+# docs/adr/0005-shadow-as-security-boundary-via-drop-sudo.md.
+# System packages must be added at image-build time, not from inside the
+# running container.
+RUN useradd -m -s /bin/bash -u 1000 coder
 
 # Allow coder user to access FUSE-mounted filesystem with allow_other.
 RUN sed -i 's/^#user_allow_other/user_allow_other/' /etc/fuse.conf 2>/dev/null \
@@ -73,8 +78,9 @@ USER root
 COPY --from=ccr-fuse-build /out/ccr-fuse /usr/local/bin/ccr-fuse
 COPY config/ccr-init.sh /usr/local/bin/ccr-init.sh
 RUN chmod 0755 /usr/local/bin/ccr-fuse /usr/local/bin/ccr-init.sh \
-    && mkdir -p /var/lib/ccr/shadow /workspace /workspace-real \
-    && chown coder:coder /var/lib/ccr/shadow
+    && mkdir -p /var/lib/ccr/shadow /var/lib/ccr/backing /workspace /workspace-real \
+    && chmod 0700 /var/lib/ccr \
+    && chown root:root /var/lib/ccr /var/lib/ccr/shadow /var/lib/ccr/backing
 USER coder
 
 WORKDIR /workspace
