@@ -1,30 +1,21 @@
-# ── Stage 1: build ccr-fuse (Go) ─────────────────────────────────
-FROM golang:1.22-alpine AS ccr-fuse-build
+# claude-container — default per-project image used when a workspace has no
+# `.ccr/config.yaml` or `.ccr/Dockerfile`. Adds the standard Claude-friendly
+# toolchain (Node, Python+uv, R, DuckDB, just, build-essential, Claude CLI)
+# on top of ccr-base. Build it with `ccr build` after `ccr build-base`.
 
-WORKDIR /src
-COPY ccr-fuse/go.mod ccr-fuse/go.sum ./
-RUN go mod download
-COPY ccr-fuse/main.go ccr-fuse/host_node.go ccr-fuse/rules.go ccr-fuse/lint.go ./
-RUN CGO_ENABLED=0 go build -o /out/ccr-fuse -ldflags "-s -w" .
+FROM ccr-base
 
-# ── Stage 2: runtime image ───────────────────────────────────────
-FROM debian:bookworm-slim
+USER root
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# ── System packages (incl. fuse3 for ccr-fuse) ───────────────────
+# ── System packages (tools the default user-image expects) ──────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        apt-utils git curl ca-certificates sudo \
+        apt-utils git curl \
         build-essential \
         python3 python3-dev python3-venv \
         r-base \
-        locales \
-        fuse3 \
-    && sed -i 's/^# *\(en_US.UTF-8\)/\1/' /etc/locale.gen \
-    && locale-gen \
     && rm -rf /var/lib/apt/lists/*
-
-ENV LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
 
 # ── Node.js 22 via NodeSource ────────────────────────────────────
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
@@ -45,18 +36,10 @@ RUN ARCH=$(dpkg --print-architecture) \
 # ── just ─────────────────────────────────────────────────────────
 RUN curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
 
-# ── Non-root user (no sudo) ──────────────────────────────────────
-# coder is intentionally unprivileged: this is what gives the shadow mechanism
-# its security boundary. With sudo, an in-container process could `umount` the
-# /workspace-real hide and bypass shadow routing. See
-# docs/adr/0005-shadow-as-security-boundary-via-drop-sudo.md.
-# System packages must be added at image-build time, not from inside the
-# running container.
-RUN useradd -m -s /bin/bash -u 1000 coder
-
-# Allow coder user to access FUSE-mounted filesystem with allow_other.
-RUN sed -i 's/^#user_allow_other/user_allow_other/' /etc/fuse.conf 2>/dev/null \
-    || echo 'user_allow_other' >> /etc/fuse.conf
+# ── In-container Claude config (baked in for the default image only) ─
+RUN mkdir -p /home/coder/.claude && chown -R coder:coder /home/coder/.claude
+COPY --chown=coder:coder config/claude-settings.json /home/coder/.claude/settings.json
+COPY --chown=coder:coder config/CLAUDE.md /home/coder/.claude/CLAUDE.md
 
 USER coder
 WORKDIR /home/coder
@@ -67,20 +50,5 @@ ENV PATH="/home/coder/.local/bin:${PATH}"
 
 # ── Claude Code CLI ──────────────────────────────────────────────
 RUN curl -fsSL https://claude.ai/install.sh | bash
-
-# ── Config files ─────────────────────────────────────────────────
-RUN mkdir -p /home/coder/.claude
-COPY --chown=coder:coder config/claude-settings.json /home/coder/.claude/settings.json
-COPY --chown=coder:coder config/CLAUDE.md /home/coder/.claude/CLAUDE.md
-
-# ── ccr-fuse binary + init script (run as PID 1 root at container start) ─
-USER root
-COPY --from=ccr-fuse-build /out/ccr-fuse /usr/local/bin/ccr-fuse
-COPY config/ccr-init.sh /usr/local/bin/ccr-init.sh
-RUN chmod 0755 /usr/local/bin/ccr-fuse /usr/local/bin/ccr-init.sh \
-    && mkdir -p /var/lib/ccr/shadow /var/lib/ccr/backing /workspace /workspace-real \
-    && chmod 0700 /var/lib/ccr \
-    && chown root:root /var/lib/ccr /var/lib/ccr/shadow /var/lib/ccr/backing
-USER coder
 
 WORKDIR /workspace

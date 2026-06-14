@@ -27,12 +27,26 @@ service-status:
 
 # ── Image ─────────────────────────────────────────────────────────
 
-# Build the container image (builder VM gets enough RAM for the claude installer)
-build:
+# Build ccr-base — minimal image holding ccr-fuse + init script + the bits
+# the ccr overlay needs. Required before `build` and before any per-project
+# image build. See ADR-0006.
+build-base:
+    container build -m {{build_memory}} \
+        -f {{justfile_directory()}}/Dockerfile.base \
+        -t ccr-base \
+        {{justfile_directory()}}
+
+# Build the default claude-container image (ccr-base + Node/Python/R/DuckDB/
+# just/Claude CLI). Used by workspaces with no .ccr/config.yaml or .ccr/Dockerfile.
+build: build-base
     container build -m {{build_memory}} -t {{image}} {{justfile_directory()}}
 
-# Rebuild without cache
+# Rebuild both ccr-base and claude-container from scratch, no cache.
 rebuild:
+    container build -m {{build_memory}} --no-cache \
+        -f {{justfile_directory()}}/Dockerfile.base \
+        -t ccr-base \
+        {{justfile_directory()}}
     container build -m {{build_memory}} --no-cache -t {{image}} {{justfile_directory()}}
 
 # Cross-build the host-side ccr-fuse binary (darwin/arm64), used by `ccr lint`

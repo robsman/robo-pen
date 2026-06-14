@@ -1,0 +1,47 @@
+# ccr-base — minimal image holding the ccr-fuse binary, the init script, and
+# the OS-level bits the ccr overlay needs to layer onto any user-chosen image.
+# Built via `ccr build-base`. The default `claude-container` image FROMs this;
+# per-project images apply the same ccr layer as a final stage atop a user's
+# image of choice (see ADR-0006).
+
+# ── Stage 1: build ccr-fuse (Go) ─────────────────────────────────
+FROM golang:1.22-alpine AS ccr-fuse-build
+
+WORKDIR /src
+COPY ccr-fuse/go.mod ccr-fuse/go.sum ./
+RUN go mod download
+COPY ccr-fuse/main.go ccr-fuse/host_node.go ccr-fuse/rules.go ccr-fuse/lint.go ccr-fuse/config.go ccr-fuse/config_cmd.go ./
+RUN CGO_ENABLED=0 go build -o /out/ccr-fuse -ldflags "-s -w" .
+
+# ── Stage 2: ccr-base runtime ────────────────────────────────────
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        fuse3 \
+        locales \
+    && sed -i 's/^# *\(en_US.UTF-8\)/\1/' /etc/locale.gen \
+    && locale-gen \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+
+# Default unprivileged user. Project images may adopt a different user via
+# `user:` in .ccr/config.yaml; ccr enforces uid ≠ 0 + no sudoers entry.
+RUN useradd -m -s /bin/bash -u 1000 coder
+
+# Allow non-root processes to access the FUSE mount with allow_other.
+RUN sed -i 's/^#user_allow_other/user_allow_other/' /etc/fuse.conf 2>/dev/null \
+    || echo 'user_allow_other' >> /etc/fuse.conf
+
+COPY --from=ccr-fuse-build /out/ccr-fuse /usr/local/bin/ccr-fuse
+COPY config/ccr-init.sh /usr/local/bin/ccr-init.sh
+
+RUN chmod 0755 /usr/local/bin/ccr-fuse /usr/local/bin/ccr-init.sh \
+    && mkdir -p /var/lib/ccr/shadow /var/lib/ccr/backing /workspace /workspace-real \
+    && chmod 0700 /var/lib/ccr \
+    && chown root:root /var/lib/ccr /var/lib/ccr/shadow /var/lib/ccr/backing
+
+WORKDIR /workspace
