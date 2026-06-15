@@ -96,11 +96,39 @@ esac
 
 # Step 1.5: refuse non-Debian/Ubuntu bases up front. The overlay installs
 # fuse3 via apt; Alpine, RHEL, Arch, distroless etc. are not supported in v1.
-# Probing with an ephemeral container costs a few seconds but yields a clearer
-# error than `apt-get: not found` deep inside the overlay build.
-if ! container run --rm "$SOURCE_REF" sh -c '[ -f /etc/debian_version ]' >/dev/null 2>&1; then
+# Pull explicitly first so a pull failure (manifest missing, network error,
+# arch mismatch) is reported as such, not conflated with a Debian-probe miss.
+# Pre-pulled images noop; first-time pulls take a few seconds.
+if ! pull_err=$(container image pull "$SOURCE_REF" 2>&1); then
     cat >&2 <<MSG
-build-project-image: base image '$SOURCE_REF' is not Debian/Ubuntu-derived.
+build-project-image: failed to pull base image '$SOURCE_REF':
+
+$pull_err
+
+Common causes: image tag does not exist, no arm64 manifest in the manifest
+list, network unreachable, or the registry requires authentication.
+MSG
+    exit 1
+fi
+
+# Probe for /etc/debian_version (Debian + Debian-derived like Ubuntu set it).
+# Use apt-get as a secondary signal — some Ubuntu spins drop the file but
+# always have apt-get. Surface stderr from the probe container so a runtime
+# crash (entrypoint issue, libc mismatch) reads as such instead of
+# masquerading as "wrong distro".
+probe_err=$(container run --rm "$SOURCE_REF" sh -c '
+    [ -f /etc/debian_version ] && exit 0
+    command -v apt-get >/dev/null 2>&1 && exit 0
+    echo "neither /etc/debian_version nor apt-get found" >&2
+    exit 1
+' 2>&1)
+probe_ec=$?
+if [ "$probe_ec" -ne 0 ]; then
+    cat >&2 <<MSG
+build-project-image: base image '$SOURCE_REF' is not Debian/Ubuntu-derived
+(probe exited $probe_ec):
+
+$probe_err
 
 rp's v1 overlay installs fuse3 via apt-get. Alpine, RHEL, Arch, distroless,
 etc. bases are not supported yet. Use a Debian-based image
