@@ -186,10 +186,11 @@ The overlay validates the user exists in the base image, has uid ≠ 0, and is n
 ### Quick start from the template
 ```bash
 cd ~/my-project
-cp -r ~/repos/robo-pen/.rp.example .rp
+rp init                       # copies .rp.example/ → .rp/ (refuses if .rp/ exists)
 $EDITOR .rp/shadow .rp/config.yaml
-rp run                # first run builds the project image
+rp run                        # first run builds the project image
 ```
+`rp init --force` overwrites an existing `.rp/`.
 
 ### Constraints
 - **Debian/Ubuntu bases only** (v1). The rp overlay installs `fuse3` via `apt-get`, so Alpine, RHEL, Arch, distroless, etc. bases are rejected up front with a clear error pointing at ADR-0006. Good bases: `debian:bookworm-slim`, `ubuntu:24.04`, `node:*-bookworm`, `python:*-slim-bookworm`. If you need Alpine-flavored tooling today, write a Debian-based `.rp/Dockerfile` that installs the equivalent packages via apt.

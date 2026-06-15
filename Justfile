@@ -100,6 +100,39 @@ build-host:
 test-host: build-host
     bash {{justfile_directory()}}/rp-fuse/tests/run-host-tests.sh
 
+# ── Workspace bootstrap ───────────────────────────────────────────
+
+# Initialize .rp/ in the current workspace from .rp.example/.
+# Pass --force to overwrite an existing .rp/ (otherwise refuses).
+init *FLAGS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    DEST="{{host_dir}}/.rp"
+    SRC="{{justfile_directory()}}/.rp.example"
+    force=0
+    for f in {{FLAGS}}; do
+        case "$f" in
+            --force|-f) force=1 ;;
+            -*) echo "rp init: unknown flag $f" >&2; exit 2 ;;
+        esac
+    done
+    if [ -e "$DEST" ]; then
+        if [ "$force" -eq 1 ]; then
+            rm -rf "$DEST"
+        else
+            echo "rp init: $DEST already exists; pass --force to overwrite, or delete it first" >&2
+            exit 1
+        fi
+    fi
+    cp -R "$SRC" "$DEST"
+    echo "Initialized $DEST from $SRC"
+    echo ""
+    echo "Next steps:"
+    echo "  \$EDITOR $DEST/shadow         # tune which paths stay container-local"
+    echo "  \$EDITOR $DEST/config.yaml    # only needed for non-default agent/image/user"
+    echo "  rp lint                       # sanity check"
+    echo "  rp create                     # build overlay + start container"
+
 # ── Container lifecycle ───────────────────────────────────────────
 
 # Internal: auto-create container if missing (bound to cwd), else verify its
