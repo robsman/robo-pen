@@ -50,6 +50,12 @@ if [[ "$1" == "lint" ]]; then
         echo "Run 'ccr build-host' to cross-build it (one-time setup)." >&2
         exit 1
     fi
+    # Pass --repo-dir so lint can resolve the agent profile bundle (built-ins
+    # live under $CLAUDE_CONTAINER_DIR/agent.profiles/). Skipped if the user
+    # already supplied --repo-dir or an explicit shadow path.
+    if ! printf '%s\n' "$@" | grep -q -e '--repo-dir'; then
+        set -- --repo-dir "$CLAUDE_CONTAINER_DIR" "$@"
+    fi
     exec "$HOST_BIN" lint "$@"
 fi
 

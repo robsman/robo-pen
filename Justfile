@@ -90,11 +90,10 @@ _ensure name=host_name:
     #!/usr/bin/env bash
     set -euo pipefail
     if ! container list -a -q | grep -qx "{{prefix}}{{name}}"; then
-        # Decide which image to use. If the workspace has .ccr/config.yaml
-        # or .ccr/Dockerfile, compose a per-project image; else fall back
-        # to the global claude-container default.
+        # build-project-image.sh always produces a tag: it overlays ccr-bits +
+        # the configured agent profile onto the user's chosen base (image:,
+        # build:, .ccr/Dockerfile, or the global default).
         IMAGE_TAG=$( {{justfile_directory()}}/scripts/build-project-image.sh "{{host_dir}}" "{{prefix}}{{name}}" )
-        IMAGE_TAG=${IMAGE_TAG:-{{image}}}
         eval "$( {{justfile_directory()}}/scripts/resolve-create-args.sh "{{host_dir}}" )"
         container create \
             --name {{prefix}}{{name}} \
@@ -102,7 +101,6 @@ _ensure name=host_name:
             --user 0 \
             -l "ccr.host_path={{host_dir}}" \
             -l ccr.managed=true \
-            -e ANTHROPIC_API_KEY \
             $CONTAINER_ENV \
             $CREATE_FLAGS \
             -v "{{host_dir}}:/workspace-real" \
@@ -134,7 +132,6 @@ create name=host_name *CONTAINER_ARGS:
         exit 1
     fi
     IMAGE_TAG=$( {{justfile_directory()}}/scripts/build-project-image.sh "{{host_dir}}" "{{prefix}}{{name}}" )
-    IMAGE_TAG=${IMAGE_TAG:-{{image}}}
     eval "$( {{justfile_directory()}}/scripts/resolve-create-args.sh "{{host_dir}}" )"
     container create \
         --name {{prefix}}{{name}} \
@@ -142,7 +139,6 @@ create name=host_name *CONTAINER_ARGS:
         --user 0 \
         -l "ccr.host_path={{host_dir}}" \
         -l ccr.managed=true \
-        -e ANTHROPIC_API_KEY \
         $CONTAINER_ENV \
         $CREATE_FLAGS \
         -v "{{host_dir}}:/workspace-real" \
@@ -169,9 +165,34 @@ shell name=host_name: (_ensure name)
 
 # Log in to the agent (Claude subscription flow opens a URL to authenticate)
 login name=host_name: (_ensure name)
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! container exec -u coder {{prefix}}{{name}} test -x /usr/local/lib/ccr/login.sh 2>/dev/null; then
+        echo "agent profile has no login flow" >&2
+        exit 1
+    fi
     container exec -it -u coder {{prefix}}{{name}} /usr/local/lib/ccr/login.sh
 
-# Run the agent in YOLO mode (auto-creates / auto-starts, optional prompt)
+# Run the agent. Default mode = bypass-permissions (the container is the
+# safety boundary). Pass --gated as the FIRST positional arg to dispatch to
+# the profile's run-gated.sh (permission-prompted) script instead.
+run name=host_name *ARGS: (_ensure name)
+    #!/usr/bin/env bash
+    set -euo pipefail
+    script=/usr/local/lib/ccr/run.sh
+    args=( {{ARGS}} )
+    if [ "${args[0]:-}" = "--gated" ]; then
+        script=/usr/local/lib/ccr/run-gated.sh
+        args=( "${args[@]:1}" )
+        if ! container exec -u coder {{prefix}}{{name}} test -x "$script" 2>/dev/null; then
+            echo "agent profile is bypass-only (no run-gated.sh)" >&2
+            exit 1
+        fi
+    fi
+    container exec -it -u coder {{prefix}}{{name}} "$script" "${args[@]}"
+
+# Run the agent in YOLO mode (auto-creates / auto-starts, optional prompt).
+# Deprecated — use `ccr run` instead. Removed in Phase E.
 claude name=host_name *PROMPT: (_ensure name)
     #!/usr/bin/env bash
     if [ -n "{{PROMPT}}" ]; then
@@ -180,7 +201,7 @@ claude name=host_name *PROMPT: (_ensure name)
         container exec -it -u coder {{prefix}}{{name}} /usr/local/lib/ccr/run.sh
     fi
 
-# Run the agent in permission-gated (prompt-on-tool-use) mode
+# Run the agent in permission-gated mode. Deprecated — use `ccr run --gated`.
 claude-safe name=host_name *PROMPT: (_ensure name)
     #!/usr/bin/env bash
     if [ -n "{{PROMPT}}" ]; then

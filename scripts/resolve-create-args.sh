@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
-# resolve-create-args.sh — translate .ccr/config.yaml into extra args for
-# `container create` and env-var lines for ccr-init.sh.
+# resolve-create-args.sh — translate .ccr/config.yaml + agent profile into
+# extra args for `container create` and env-var lines for ccr-init.sh.
 #
 # Usage:
 #   eval "$(scripts/resolve-create-args.sh <workspace-dir>)"
 #
 # Defines two shell variables in the caller's env:
 #   CREATE_FLAGS — extra flags string (e.g. "--memory 4G --cpus 2")
-#   CONTAINER_ENV — extra `-e VAR=value` flags
+#   CONTAINER_ENV — extra `-e VAR` flags (forwards host values into the container)
 #
-# Empty / missing config.yaml yields empty values.
+# Empty / missing config.yaml yields default behavior: the claude-code profile's
+# env allow-list (ANTHROPIC_API_KEY) is forwarded.
 
 set -euo pipefail
 
@@ -43,9 +44,22 @@ if [ -x "$CCR_FUSE" ] && [ -f "$CONFIG" ]; then
 fi
 
 # Forward CCR_DEBUG if set in the host shell. Lets the user diagnose a
-# specific session without baking debug into config: `CCR_DEBUG=1 ccr claude`.
+# specific session without baking debug into config: `CCR_DEBUG=1 ccr run`.
 if [ "${CCR_DEBUG:-}" = "1" ]; then
     CONTAINER_ENV="$CONTAINER_ENV -e CCR_DEBUG=1"
+fi
+
+# Forward each env var declared in the agent profile's manifest. Missing
+# values on the host are silently skipped — `container create -e VAR`
+# with no value forwards whatever (or nothing) the host has.
+if [ -x "$CCR_FUSE" ]; then
+    AGENT=$("$CCR_FUSE" config --file "$CONFIG" field agent 2>/dev/null || echo "claude-code")
+    if env_list=$("$CCR_FUSE" profile --workspace "$WORKSPACE" --repo-dir "$REPO_DIR" --agent "$AGENT" field env 2>/dev/null); then
+        while IFS= read -r v; do
+            [ -z "$v" ] && continue
+            CONTAINER_ENV="$CONTAINER_ENV -e $v"
+        done <<<"$env_list"
+    fi
 fi
 
 # Emit lines for `eval`.

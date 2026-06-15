@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -31,16 +32,18 @@ type LintEntry struct {
 func runLint(args []string) {
 	fs := flag.NewFlagSet("lint", flag.ExitOnError)
 	matchPath := fs.String("match", "", "report whether this workspace-relative path would be shadowed")
+	workspace := fs.String("workspace", ".", "workspace directory (default: current dir)")
+	repoDir := fs.String("repo-dir", "", "claude-container repo dir (skips profile lint if empty)")
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "Usage: ccr-fuse lint [--match <path>] [<.ccr/shadow file>]")
-		fmt.Fprintln(os.Stderr, "  Default: lints .ccr/shadow and validates .ccr/config.yaml (if present)")
+		fmt.Fprintln(os.Stderr, "Usage: ccr-fuse lint [--match <path>] [--workspace <ws>] [--repo-dir <repo>] [<.ccr/shadow file>]")
+		fmt.Fprintln(os.Stderr, "  Default: lints .ccr/shadow, validates .ccr/config.yaml, and resolves the agent profile.")
 		fs.PrintDefaults()
 	}
 	_ = fs.Parse(args)
 
 	exitCode := 0
 
-	shadowPath := ".ccr/shadow"
+	shadowPath := filepath.Join(*workspace, ".ccr", "shadow")
 	explicit := fs.NArg() > 0
 	if explicit {
 		shadowPath = fs.Arg(0)
@@ -49,11 +52,25 @@ func runLint(args []string) {
 	hadShadow := lintShadow(shadowPath, *matchPath, explicit, &exitCode)
 
 	if !explicit {
-		if _, err := os.Stat(".ccr/config.yaml"); err == nil {
+		configPath := filepath.Join(*workspace, ".ccr", "config.yaml")
+		hadConfig := false
+		var cfg *ProjectConfig
+		if _, err := os.Stat(configPath); err == nil {
 			if hadShadow {
 				fmt.Println()
 			}
-			lintConfig(".ccr/config.yaml", &exitCode)
+			cfg = lintConfig(configPath, &exitCode)
+			hadConfig = true
+		}
+		if *repoDir != "" {
+			agent := DefaultAgent
+			if cfg != nil {
+				agent = cfg.AgentName()
+			}
+			if hadShadow || hadConfig {
+				fmt.Println()
+			}
+			lintProfile(*workspace, *repoDir, agent, cfg, &exitCode)
 		}
 	}
 
@@ -128,14 +145,16 @@ func lintShadow(path, matchPath string, explicit bool, exitCode *int) bool {
 }
 
 // lintConfig parses .ccr/config.yaml and prints a short summary line.
-func lintConfig(path string, exitCode *int) {
+// Returns the parsed config (nil on parse error) so the caller can re-use
+// the agent name for profile lint.
+func lintConfig(path string, exitCode *int) *ProjectConfig {
 	cfg, err := ParseProjectConfig(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %v\n", path, err)
 		if *exitCode < 1 {
 			*exitCode = 1
 		}
-		return
+		return nil
 	}
 
 	source := "default (claude-container)"
@@ -149,7 +168,12 @@ func lintConfig(path string, exitCode *int) {
 	if user == "" {
 		user = "coder (default)"
 	}
+	agent := cfg.AgentName()
+	if cfg.Agent == "" {
+		agent += " (default)"
+	}
 	fmt.Printf("%s: OK\n", path)
+	fmt.Printf("  agent: %s\n", agent)
 	fmt.Printf("  image source: %s\n", source)
 	fmt.Printf("  container user: %s\n", user)
 	if cfg.Resources != nil {
@@ -162,6 +186,85 @@ func lintConfig(path string, exitCode *int) {
 	}
 	if cfg.Fuse != nil && cfg.Fuse.Cache != nil {
 		fmt.Printf("  fuse.cache: %g\n", *cfg.Fuse.Cache)
+	}
+	return cfg
+}
+
+// lintProfile resolves and validates the agent profile bundle. Reports the
+// source ("workspace" or "builtin"), checks required entrypoints exist as
+// executable files, warns on missing optional entrypoints + partial workspace
+// overrides + host env vars declared but unset.
+func lintProfile(workspace, repoDir, agent string, cfg *ProjectConfig, exitCode *int) {
+	// Detect partial workspace override: directory exists, manifest.yaml missing.
+	wsDir := filepath.Join(workspace, ".ccr", "agents", agent)
+	if info, err := os.Stat(wsDir); err == nil && info.IsDir() {
+		if _, err := os.Stat(filepath.Join(wsDir, "manifest.yaml")); err != nil {
+			fmt.Printf("agent profile %s: WARN partial workspace override at %s lacks manifest.yaml; falling through to builtin\n", agent, wsDir)
+			if *exitCode < 1 {
+				*exitCode = 0 // warn, not err
+			}
+		}
+	}
+
+	m, dir, source, err := LoadResolvedProfile(workspace, repoDir, agent)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "agent profile %s: %v\n", agent, err)
+		if *exitCode < 1 {
+			*exitCode = 1
+		}
+		return
+	}
+
+	fmt.Printf("agent profile %s: OK (%s)\n", agent, source)
+	fmt.Printf("  dir: %s\n", dir)
+	if m.Description != "" {
+		fmt.Printf("  description: %s\n", m.Description)
+	}
+
+	for _, kind := range []struct {
+		name     string
+		required bool
+	}{
+		{EntrypointInstall, true},
+		{EntrypointRun, true},
+		{EntrypointRunGated, false},
+		{EntrypointLogin, false},
+	} {
+		rel := m.Entrypoint(kind.name)
+		full := filepath.Join(dir, rel)
+		info, err := os.Stat(full)
+		switch {
+		case err != nil:
+			if kind.required {
+				fmt.Printf("  ERR  entrypoint %s: %s not found\n", kind.name, rel)
+				if *exitCode < 1 {
+					*exitCode = 1
+				}
+			} else {
+				fmt.Printf("  WARN entrypoint %s: %s not found (optional)\n", kind.name, rel)
+			}
+		case info.Mode()&0o111 == 0:
+			fmt.Printf("  WARN entrypoint %s: %s exists but is not executable\n", kind.name, rel)
+		default:
+			fmt.Printf("  OK   entrypoint %s: %s\n", kind.name, rel)
+		}
+	}
+
+	containerUser := "coder"
+	if cfg != nil && cfg.User != "" {
+		containerUser = cfg.User
+	}
+	for _, f := range m.Files {
+		expanded := strings.ReplaceAll(f.Dst, "{{user}}", containerUser)
+		if !strings.HasPrefix(expanded, "/home/"+containerUser+"/") {
+			fmt.Printf("  WARN file dst %q resolves to %q which is outside /home/%s/\n", f.Dst, expanded, containerUser)
+		}
+	}
+
+	for _, v := range m.Env {
+		if _, present := os.LookupEnv(v); !present {
+			fmt.Printf("  INFO env %s declared by profile but unset on host\n", v)
+		}
 	}
 }
 

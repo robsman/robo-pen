@@ -39,8 +39,13 @@ RUN sed -i 's/^#user_allow_other/user_allow_other/' /etc/fuse.conf 2>/dev/null \
 COPY --from=ccr-fuse-build /out/ccr-fuse /usr/local/bin/ccr-fuse
 COPY config/ccr-init.sh /usr/local/bin/ccr-init.sh
 
+# Agent-agnostic container fundamentals fragment. The overlay copies this
+# into the project image so every container's composed agent instructions
+# include the basics (workspace layout, no-sudo, etc.).
+COPY config/00-container.md /etc/ccr/instructions/00-container.md
+
 RUN chmod 0755 /usr/local/bin/ccr-fuse /usr/local/bin/ccr-init.sh \
-    && mkdir -p /var/lib/ccr/shadow /var/lib/ccr/backing /workspace /workspace-real \
+    && mkdir -p /var/lib/ccr/shadow /var/lib/ccr/backing /workspace /workspace-real /usr/local/lib/ccr \
     && chmod 0700 /var/lib/ccr \
     && chown root:root /var/lib/ccr /var/lib/ccr/shadow /var/lib/ccr/backing
 
