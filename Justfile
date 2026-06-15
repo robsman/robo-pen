@@ -22,7 +22,8 @@ list_prefix := "rp-"
 # Memory for the long-lived Apple Container builder VM. Effective only at
 # `container builder start` — once the builder is up, this is ignored.
 # Run `just builder-reset` to apply a new value. 8G is the verified minimum
-# for a full robo-pen-default rebuild including the Claude CLI installer.
+# for a full base + default-image rebuild + an overlay that runs the
+# claude-code profile's install.sh (Node + Claude CLI fetched at overlay time).
 builder_memory := "8G"
 
 # ── Apple container setup ────────────────────────────────────────
@@ -114,6 +115,7 @@ _ensure name=host_name:
             --cap-add SYS_ADMIN \
             --user 0 \
             -l "rp.host_path={{host_dir}}" \
+            -l "rp.agent={{agent}}" \
             -l rp.managed=true \
             $CONTAINER_ENV \
             $CREATE_FLAGS \
@@ -152,6 +154,7 @@ create name=host_name *CONTAINER_ARGS:
         --cap-add SYS_ADMIN \
         --user 0 \
         -l "rp.host_path={{host_dir}}" \
+        -l "rp.agent={{agent}}" \
         -l rp.managed=true \
         $CONTAINER_ENV \
         $CREATE_FLAGS \
@@ -221,16 +224,21 @@ destroy name=host_name:
 
 # ── Info / diagnostics ────────────────────────────────────────────
 
-# List all claude containers with their workspace path
+# List all rp-managed containers (grouped by workspace path, with agent column)
 list:
     #!/usr/bin/env bash
-    set -uo pipefail
+    set -u
     {
-        printf "NAME\tSTATUS\tWORKSPACE\n"
-        container list -a -q 2>/dev/null | grep "^{{list_prefix}}" 2>/dev/null | while read -r n; do
+        printf "WORKSPACE\tAGENT\tNAME\tSTATUS\n"
+        container list -a -q 2>/dev/null | grep "^{{list_prefix}}" 2>/dev/null | (while read -r n; do
             container inspect "$n" 2>/dev/null \
-                | jq -r --arg n "$n" '.[0] | [$n, .status.state, (.configuration.labels["rp.host_path"] // "-")] | @tsv'
-        done
+                | jq -r --arg n "$n" '.[0] | [
+                    (.configuration.labels["rp.host_path"] // "-"),
+                    (.configuration.labels["rp.agent"] // "-"),
+                    $n,
+                    .status.state
+                ] | @tsv'
+        done | sort) || true
     } | column -t -s $'\t'
 
 # Show container logs

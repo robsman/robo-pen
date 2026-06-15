@@ -36,8 +36,8 @@ WORKSPACE=$1
 CONT_NAME=$2
 
 REPO_DIR=$(cd "$(dirname "$0")/.." && pwd)
-CCR_FUSE="$REPO_DIR/rp-fuse/rp-fuse-darwin-arm64"
-if [ ! -x "$CCR_FUSE" ]; then
+RP_FUSE="$REPO_DIR/rp-fuse/rp-fuse-darwin-arm64"
+if [ ! -x "$RP_FUSE" ]; then
     echo "build-project-image: host rp-fuse binary missing; run 'rp build-host' first" >&2
     exit 1
 fi
@@ -46,17 +46,17 @@ CONFIG="$WORKSPACE/.rp/config.yaml"
 DEFAULT_DOCKERFILE="$WORKSPACE/.rp/Dockerfile"
 
 # Resolve agent + user from .rp/config.yaml (or defaults).
-AGENT=$("$CCR_FUSE" config --file "$CONFIG" field agent 2>/dev/null || echo "claude-code")
-CCR_USER_CFG=$("$CCR_FUSE" config --file "$CONFIG" field user 2>/dev/null || echo "")
-CCR_USER=${CCR_USER_CFG:-coder}
+AGENT=$("$RP_FUSE" config --file "$CONFIG" field agent 2>/dev/null || echo "claude-code")
+RP_USER_CFG=$("$RP_FUSE" config --file "$CONFIG" field user 2>/dev/null || echo "")
+RP_USER=${RP_USER_CFG:-coder}
 
 # Resolve the agent profile dir (workspace override > builtin).
-PROFILE_DIR=$("$CCR_FUSE" profile --workspace "$WORKSPACE" --repo-dir "$REPO_DIR" --agent "$AGENT" resolve)
-PROFILE_SOURCE=$("$CCR_FUSE" profile --workspace "$WORKSPACE" --repo-dir "$REPO_DIR" --agent "$AGENT" source)
-echo "build-project-image: agent=$AGENT profile=$PROFILE_DIR ($PROFILE_SOURCE) user=$CCR_USER" >&2
+PROFILE_DIR=$("$RP_FUSE" profile --workspace "$WORKSPACE" --repo-dir "$REPO_DIR" --agent "$AGENT" resolve)
+PROFILE_SOURCE=$("$RP_FUSE" profile --workspace "$WORKSPACE" --repo-dir "$REPO_DIR" --agent "$AGENT" source)
+echo "build-project-image: agent=$AGENT profile=$PROFILE_DIR ($PROFILE_SOURCE) user=$RP_USER" >&2
 
 # Resolve which image-source kind applies.
-SOURCE=$("$CCR_FUSE" config --file "$CONFIG" field source 2>/dev/null || echo "default")
+SOURCE=$("$RP_FUSE" config --file "$CONFIG" field source 2>/dev/null || echo "default")
 if [ "$SOURCE" = "default" ] && [ -f "$DEFAULT_DOCKERFILE" ]; then
     SOURCE="dockerfile_default"
 fi
@@ -66,12 +66,12 @@ TAG="$CONT_NAME:latest-rp"
 # Step 1: produce the SOURCE_REF — the image used as the FROM line in the overlay.
 case "$SOURCE" in
     image)
-        SOURCE_REF=$("$CCR_FUSE" config --file "$CONFIG" field image)
+        SOURCE_REF=$("$RP_FUSE" config --file "$CONFIG" field image)
         echo "build-project-image: source=image ref=$SOURCE_REF" >&2
         ;;
     build)
-        CTX_REL=$("$CCR_FUSE" config --file "$CONFIG" field context)
-        DF_REL=$("$CCR_FUSE" config --file "$CONFIG" field dockerfile)
+        CTX_REL=$("$RP_FUSE" config --file "$CONFIG" field context)
+        DF_REL=$("$RP_FUSE" config --file "$CONFIG" field dockerfile)
         CONTEXT=$(cd "$WORKSPACE/.rp/$CTX_REL" && pwd)
         DOCKERFILE="$CONTEXT/$DF_REL"
         SOURCE_REF="$CONT_NAME:user"
@@ -123,7 +123,7 @@ cp "$PROFILE_DIR/instructions.md" "$OVERLAY_CTX/agent/instructions.md"
 
 # Profile entrypoint scripts — baked into /usr/local/lib/rp/ for `rp run` etc.
 for ep_kind in run run_gated login; do
-    rel=$("$CCR_FUSE" profile --workspace "$WORKSPACE" --repo-dir "$REPO_DIR" --agent "$AGENT" field "entrypoint.$ep_kind")
+    rel=$("$RP_FUSE" profile --workspace "$WORKSPACE" --repo-dir "$REPO_DIR" --agent "$AGENT" field "entrypoint.$ep_kind")
     if [ -n "$rel" ] && [ -f "$PROFILE_DIR/$rel" ]; then
         # Normalize to a flat filename inside the overlay context (avoids
         # path traversal headaches; the conventional names are unique).
@@ -134,7 +134,7 @@ done
 
 # Profile files (manifest's `files:` section) — copy each src into the
 # overlay context preserving relative path so the COPY line is clean.
-FILES_LINES=$("$CCR_FUSE" profile --workspace "$WORKSPACE" --repo-dir "$REPO_DIR" --agent "$AGENT" field files || true)
+FILES_LINES=$("$RP_FUSE" profile --workspace "$WORKSPACE" --repo-dir "$REPO_DIR" --agent "$AGENT" field files || true)
 while IFS=$'\t' read -r src dst; do
     [ -z "$src" ] && continue
     mkdir -p "$OVERLAY_CTX/agent/files/$(dirname "$src")"
@@ -146,17 +146,17 @@ if [ -f "$WORKSPACE/.rp/instructions.md" ]; then
     cp "$WORKSPACE/.rp/instructions.md" "$OVERLAY_CTX/agent/workspace-instructions.md"
 fi
 
-INSTRUCTIONS_DST=$("$CCR_FUSE" profile --workspace "$WORKSPACE" --repo-dir "$REPO_DIR" --agent "$AGENT" field instructions_dst || true)
+INSTRUCTIONS_DST=$("$RP_FUSE" profile --workspace "$WORKSPACE" --repo-dir "$REPO_DIR" --agent "$AGENT" field instructions_dst || true)
 
 USER_EXIST_CHECK=""
-if [ -n "$CCR_USER_CFG" ]; then
+if [ -n "$RP_USER_CFG" ]; then
     # User explicitly named in config: must exist in the base image (do not create).
-    USER_EXIST_CHECK="RUN id -u $CCR_USER >/dev/null 2>&1 \\
-    || (echo \"rp-overlay: user '$CCR_USER' does not exist in base image\" >&2; exit 1)"
+    USER_EXIST_CHECK="RUN id -u $RP_USER >/dev/null 2>&1 \\
+    || (echo \"rp-overlay: user '$RP_USER' does not exist in base image\" >&2; exit 1)"
 else
     # Default coder: create if missing.
-    USER_EXIST_CHECK="RUN id -u $CCR_USER >/dev/null 2>&1 \\
-    || useradd -m -s /bin/bash -u 1000 $CCR_USER"
+    USER_EXIST_CHECK="RUN id -u $RP_USER >/dev/null 2>&1 \\
+    || useradd -m -s /bin/bash -u 1000 $RP_USER"
 fi
 
 # Compose the overlay Dockerfile.
@@ -179,10 +179,10 @@ RUN sed -i 's/^#user_allow_other/user_allow_other/' /etc/fuse.conf 2>/dev/null \
 $USER_EXIST_CHECK
 
 # Hardening invariants per ADR-0006.
-RUN test "\$(id -u $CCR_USER)" -ne 0 \\
-    || (echo "rp-overlay: user '$CCR_USER' is root, refusing" >&2; exit 1)
-RUN ! grep -rqE "(^|[[:space:]])${CCR_USER}([[:space:]]|\$)" /etc/sudoers /etc/sudoers.d/ 2>/dev/null \\
-    || (echo "rp-overlay: user '$CCR_USER' has a sudoers entry, refusing" >&2; exit 1)
+RUN test "\$(id -u $RP_USER)" -ne 0 \\
+    || (echo "rp-overlay: user '$RP_USER' is root, refusing" >&2; exit 1)
+RUN ! grep -rqE "(^|[[:space:]])${RP_USER}([[:space:]]|\$)" /etc/sudoers /etc/sudoers.d/ 2>/dev/null \\
+    || (echo "rp-overlay: user '$RP_USER' has a sudoers entry, refusing" >&2; exit 1)
 
 # Mount points for the shadow boundary + agent entrypoint dir.
 RUN mkdir -p /var/lib/rp/shadow /var/lib/rp/backing /workspace /workspace-real /usr/local/lib/rp \\
@@ -215,24 +215,24 @@ done
 while IFS=$'\t' read -r src dst; do
     [ -z "$src" ] && continue
     # Template {{user}} in the destination.
-    expanded_dst=${dst//\{\{user\}\}/$CCR_USER}
+    expanded_dst=${dst//\{\{user\}\}/$RP_USER}
     parent_dir=$(dirname "$expanded_dst")
-    printf 'RUN mkdir -p %s && chown %s:%s %s\n' "$parent_dir" "$CCR_USER" "$CCR_USER" "$parent_dir"
-    printf 'COPY --chown=%s:%s agent/files/%s %s\n' "$CCR_USER" "$CCR_USER" "$src" "$expanded_dst"
+    printf 'RUN mkdir -p %s && chown %s:%s %s\n' "$parent_dir" "$RP_USER" "$RP_USER" "$parent_dir"
+    printf 'COPY --chown=%s:%s agent/files/%s %s\n' "$RP_USER" "$RP_USER" "$src" "$expanded_dst"
 done <<<"$FILES_LINES"
 
 cat <<EOF
 
 # Run the profile's install.sh as the container user.
-USER $CCR_USER
-COPY --chown=$CCR_USER:$CCR_USER agent/install.sh /tmp/agent-install.sh
+USER $RP_USER
+COPY --chown=$RP_USER:$RP_USER agent/install.sh /tmp/agent-install.sh
 RUN bash /tmp/agent-install.sh && rm /tmp/agent-install.sh
 
 USER root
 EOF
 
 if [ -n "$INSTRUCTIONS_DST" ]; then
-    expanded_inst=${INSTRUCTIONS_DST//\{\{user\}\}/$CCR_USER}
+    expanded_inst=${INSTRUCTIONS_DST//\{\{user\}\}/$RP_USER}
     expanded_dir=$(dirname "$expanded_inst")
     cat <<EOF
 # Compose agent instructions from /etc/rp/instructions/*.md (lexical order,
@@ -240,14 +240,14 @@ if [ -n "$INSTRUCTIONS_DST" ]; then
 RUN mkdir -p $expanded_dir \\
     && awk 'FNR==1 && NR>1 {print ""} {print}' /etc/rp/instructions/*.md \\
         > $expanded_inst \\
-    && chown -R $CCR_USER:$CCR_USER $expanded_dir
+    && chown -R $RP_USER:$RP_USER $expanded_dir
 EOF
 fi
 
 cat <<EOF
 
 WORKDIR /workspace
-USER $CCR_USER
+USER $RP_USER
 EOF
 } > "$OVERLAY_DOCKERFILE"
 

@@ -62,7 +62,7 @@ agent.profiles/<name>/   — built-in agent profile bundles (claude-code is the 
   settings/             — files baked into the image at manifest's files[].dst
   instructions.md       — agent-specific fragment for the composed CLAUDE.md / AGENTS.md
 config/
-  00-container.md       — agent-agnostic ccr container fundamentals (baked into rp-base)
+  00-container.md       — agent-agnostic container fundamentals (baked into rp-base)
   10-toolchain-default.md — toolchain table for the default image (baked into robo-pen-default)
   rp-init.sh            — baked into the image at /usr/local/bin/rp-init.sh; PID 1; execs rp-fuse
 .env.example            — template for ANTHROPIC_API_KEY (also forwarded based on profile manifest's env: list)

@@ -23,21 +23,21 @@ WORKSPACE=$1
 CONFIG="$WORKSPACE/.rp/config.yaml"
 
 REPO_DIR=$(cd "$(dirname "$0")/.." && pwd)
-CCR_FUSE="$REPO_DIR/rp-fuse/rp-fuse-darwin-arm64"
+RP_FUSE="$REPO_DIR/rp-fuse/rp-fuse-darwin-arm64"
 
 CREATE_FLAGS=""
 CONTAINER_ENV=""
 
-if [ -x "$CCR_FUSE" ] && [ -f "$CONFIG" ]; then
-    mem=$("$CCR_FUSE" config --file "$CONFIG" field resources.memory 2>/dev/null || true)
+if [ -x "$RP_FUSE" ] && [ -f "$CONFIG" ]; then
+    mem=$("$RP_FUSE" config --file "$CONFIG" field resources.memory 2>/dev/null || true)
     if [ -n "$mem" ]; then
         CREATE_FLAGS="$CREATE_FLAGS --memory $mem"
     fi
-    cpus=$("$CCR_FUSE" config --file "$CONFIG" field resources.cpus 2>/dev/null || true)
+    cpus=$("$RP_FUSE" config --file "$CONFIG" field resources.cpus 2>/dev/null || true)
     if [ -n "$cpus" ]; then
         CREATE_FLAGS="$CREATE_FLAGS --cpus $cpus"
     fi
-    cache=$("$CCR_FUSE" config --file "$CONFIG" field fuse.cache 2>/dev/null || true)
+    cache=$("$RP_FUSE" config --file "$CONFIG" field fuse.cache 2>/dev/null || true)
     if [ -n "$cache" ]; then
         CONTAINER_ENV="$CONTAINER_ENV -e RP_CACHE=$cache"
     fi
@@ -52,9 +52,9 @@ fi
 # Forward each env var declared in the agent profile's manifest. Missing
 # values on the host are silently skipped — `container create -e VAR`
 # with no value forwards whatever (or nothing) the host has.
-if [ -x "$CCR_FUSE" ]; then
-    AGENT=$("$CCR_FUSE" config --file "$CONFIG" field agent 2>/dev/null || echo "claude-code")
-    if env_list=$("$CCR_FUSE" profile --workspace "$WORKSPACE" --repo-dir "$REPO_DIR" --agent "$AGENT" field env 2>/dev/null); then
+if [ -x "$RP_FUSE" ]; then
+    AGENT=$("$RP_FUSE" config --file "$CONFIG" field agent 2>/dev/null || echo "claude-code")
+    if env_list=$("$RP_FUSE" profile --workspace "$WORKSPACE" --repo-dir "$REPO_DIR" --agent "$AGENT" field env 2>/dev/null); then
         while IFS= read -r v; do
             [ -z "$v" ] && continue
             CONTAINER_ENV="$CONTAINER_ENV -e $v"
