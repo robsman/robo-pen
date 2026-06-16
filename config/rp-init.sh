@@ -51,7 +51,11 @@ if [ -n "${RP_USER:-}" ]; then
         echo "rp-init: configured RP_USER '$RP_USER' has uid 0; refusing to launch (shadow boundary requires uid != 0)" >&2
         exec sleep infinity
     fi
-    if grep -rqE "(^|[[:space:]])${RP_USER}([[:space:]]|$)" /etc/sudoers /etc/sudoers.d/ 2>/dev/null; then
+    # Strip comments before matching so a legitimate base-image comment
+    # like '# Ditto for GPG agent' doesn't false-positive when the
+    # configured user happens to be named the same as a word in comments.
+    if cat /etc/sudoers /etc/sudoers.d/* 2>/dev/null | sed 's/#.*//' \
+            | grep -qE "(^|[[:space:]])${RP_USER}([[:space:]]|$)"; then
         echo "rp-init: configured RP_USER '$RP_USER' has a sudoers entry; refusing to launch (shadow boundary requires no sudo)" >&2
         exec sleep infinity
     fi

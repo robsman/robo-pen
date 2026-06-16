@@ -241,8 +241,14 @@ EOF
 fi
 
 cat <<EOF
-RUN ! grep -rqE "(^|[[:space:]])${RP_USER}([[:space:]]|\$)" /etc/sudoers /etc/sudoers.d/ 2>/dev/null \\
-    || (echo "rp-overlay: user '$RP_USER' has a sudoers entry, refusing" >&2; exit 1)
+# Refuse if the configured user has any sudoers entry. Strip comments
+# before matching so legitimate base-image comments like
+# '# Ditto for GPG agent' in /etc/sudoers don't false-positive when the
+# user happens to be named the same as a word in those comments.
+RUN if cat /etc/sudoers /etc/sudoers.d/* 2>/dev/null | sed 's/#.*//' \\
+        | grep -qE "(^|[[:space:]])${RP_USER}([[:space:]]|\$)"; then \\
+        echo "rp-overlay: user '$RP_USER' has a sudoers entry, refusing" >&2; exit 1; \\
+    fi
 
 # Mount points for the shadow boundary + agent entrypoint dir.
 RUN mkdir -p /var/lib/rp/shadow /var/lib/rp/backing /workspace /workspace-real /usr/local/lib/rp \\

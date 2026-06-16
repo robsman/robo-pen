@@ -148,8 +148,13 @@ EOF
 fi
 
 cat <<EOF
-RUN ! grep -rqE "(^|[[:space:]])${RP_USER}([[:space:]]|\$)" /etc/sudoers /etc/sudoers.d/ 2>/dev/null \\
-    || (echo "rp-docker-experiment: user '$RP_USER' has a sudoers entry, refusing" >&2; exit 1)
+# Strip comments before matching so a legitimate base-image comment like
+# '# Ditto for GPG agent' in /etc/sudoers doesn't false-positive when the
+# user happens to be named the same as a word in those comments.
+RUN if cat /etc/sudoers /etc/sudoers.d/* 2>/dev/null | sed 's/#.*//' \\
+        | grep -qE "(^|[[:space:]])${RP_USER}([[:space:]]|\$)"; then \\
+        echo "rp-docker-experiment: user '$RP_USER' has a sudoers entry, refusing" >&2; exit 1; \\
+    fi
 
 RUN mkdir -p /var/lib/rp/shadow /var/lib/rp/backing /workspace /workspace-real /usr/local/lib/rp \\
     && chmod 0700 /var/lib/rp \\
