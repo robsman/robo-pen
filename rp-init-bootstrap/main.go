@@ -26,6 +26,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"syscall"
 )
@@ -33,6 +34,23 @@ import (
 const target = "/usr/local/bin/rp-init.sh"
 
 func main() {
+	// Equalize RUID/EUID/SUID to 0. The kernel's setuid-bit handling only
+	// sets EUID + SAVED, leaving RUID as the caller's (1000 / agent on
+	// Docker Sandbox-style images). Some userland tools — notably
+	// util-linux's mount(8) — check getuid() (real) instead of geteuid(),
+	// and refuse with "must be superuser" if RUID != 0. setresuid(0,0,0)
+	// puts the whole identity at 0; CAP_SETUID is in our capability set
+	// after escalation. No-op when invoked under Apple Container (the
+	// container was created with --user 0 so all three are already 0).
+	if err := syscall.Setresuid(0, 0, 0); err != nil {
+		fmt.Fprintf(os.Stderr, "rp-init-bootstrap: setresuid: %v\n", err)
+		os.Exit(1)
+	}
+	if err := syscall.Setresgid(0, 0, 0); err != nil {
+		fmt.Fprintf(os.Stderr, "rp-init-bootstrap: setresgid: %v\n", err)
+		os.Exit(1)
+	}
+
 	// Snapshot the one env var we forward, then wipe everything.
 	debug, hasDebug := os.LookupEnv("RP_DEBUG")
 	rpCache, hasRPCache := os.LookupEnv("RP_CACHE")

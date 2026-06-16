@@ -18,3 +18,28 @@ The wrapper:
 These constraints mean the audit surface is the wrapper's ~30 lines plus the existing rp-init.sh + rp-fuse content — the same content that already runs as root under Apple Container. The bootstrap doesn't widen what root-in-container can do; it just provides a second path to reach that state. We rejected sudo and capability-file grants because each is a more general escalation primitive (sudo grants execution of any command; capabilities like `cap_sys_admin` apply to all execs of a binary, not just the bootstrap flow).
 
 The wrapper is no-op for Apple Container: that path stays on `container create --user 0` and never invokes the bootstrap. It only matters under Docker / Docker Sandbox / any runtime that defaults the container to a non-root user. If a future maintainer is tempted to extend the wrapper to accept arguments or call a different target, the comment in `main.go` forbids it and points back here.
+
+## RUID/EUID equalization via setresuid
+
+The kernel's setuid-bit handling sets EUID and SUID to the file owner (0) but leaves RUID as the caller (1000 / agent under Docker Sandbox). Caps are computed correctly; most syscalls only care about EUID + caps. **But util-linux's `mount(8)` does a userland precheck on `getuid()` (RUID) and bails with "must be superuser" if it's nonzero**, never issuing the mount syscall. Found this the hard way: on Docker Desktop, every tmpfs mount in `rp-init.sh` failed even though `CapEff` contained `CAP_SYS_ADMIN` and `Uid:` was `1000 0 0 0`.
+
+Fix: bootstrap calls `setresuid(0, 0, 0)` (and `setresgid`) before `execve`. Requires CAP_SETUID, which we have. Result: the script lands at `Uid: 0 0 0 0` and util-linux's precheck passes. No-op when called under Apple Container's `--user 0` flow, since RUID is already 0.
+
+This is technically separable from the setuid-Bootstrap purpose, but lives in the same binary because both concerns serve the same goal — "make the script see a complete root identity" — and splitting them into two binaries would just multiply the audit surface.
+
+## FD-as-backing mount layout
+
+Independent of the bootstrap, the script needs to bind/move the host workspace into a private location so rp-fuse can read it while the container user cannot reach it. Docker Desktop's host file-sharing layer presents bind mounts via a `fakeowner` FS driver that refuses to be the source of any further `mount --bind`, `--rbind`, or `--move`. Even `--privileged` doesn't bypass that.
+
+So the script now uses an open file descriptor as the backing reference instead of a mount:
+
+```
+1. bash `exec {BACKING_FD}<$REAL` captures fd on the host bind
+2. mount -t tmpfs none $REAL  (allowed — mount ONTO fakeowner is fine)
+3. rp-fuse --backing-fd N
+   rp-fuse resolves /proc/self/fd/N — the kernel's "magic symlink" reaches
+   through the fd's inode, bypassing path lookup of the now-overmounted
+   /workspace-real.
+```
+
+No `/var/lib/rp/backing` mountpoint; no bind/move operations on the fakeowner mount. The same code path works on Apple Container's virtiofs (which would have allowed bind anyway). One less coupling to host-share FS quirks.
