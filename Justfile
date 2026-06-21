@@ -112,6 +112,23 @@ test-host: build-host
 test-integration: build-host
     bash {{justfile_directory()}}/tests/integration/run-all.sh
 
+# Run Go unit tests for rp-fuse (rules, lint, config, profile).
+test-go:
+    container run --rm \
+        -v "{{justfile_directory()}}/rp-fuse":/src \
+        -w /src \
+        golang:1.22-alpine \
+        go test ./...
+
+# Run the rule-matching benchmarks. Compare fast-path vs negation regex
+# (ADR-0011 documents the cliff). Reads numbers from BenchmarkMatch*.
+bench-rules:
+    container run --rm \
+        -v "{{justfile_directory()}}/rp-fuse":/src \
+        -w /src \
+        golang:1.22-alpine \
+        go test -bench=BenchmarkMatch -benchmem -run=^$ -count=1 ./...
+
 # ── Workspace bootstrap ───────────────────────────────────────────
 
 # Initialize .rp/ in the current workspace from .rp.example/.

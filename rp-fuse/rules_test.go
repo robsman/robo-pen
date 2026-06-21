@@ -372,27 +372,112 @@ func TestFastPathWithGlobsAlsoOK(t *testing.T) {
 }
 
 // Benchmarks: compare fast-path Rules.Match against pure go-gitignore.
-func BenchmarkMatchLiteralFastPath(b *testing.B) {
-	r, _ := parseRulesReader(strings.NewReader("node_modules\n.env.local\n.venv\ntarget\ndist\n"))
-	queries := []string{
-		"node_modules", "a/b/node_modules", "src/main.go", ".env.local",
-		"a/x/y/z/something", "deep/nested/.venv", "target", "x/y/dist",
-	}
+//
+// Three rule sets to probe the perf cliff that negation introduces:
+//   * smallNoNeg — typical .rp.example/shadow (no negation); fast-path
+//     dominates.
+//   * smallWithNeg — same plus a re-expose subtree; fast-path disabled
+//     for ALL paths (current impl); regex carries the whole load.
+//   * largeNoNeg — 20+ rules, no negation; fast-path still does the work.
+//
+// Question being answered: is a "partition only the dependent positives
+// onto the slow path" optimization worth implementing? Run with:
+//
+//   go test -bench=BenchmarkMatch -benchmem ./...
+//
+// Compare the no-neg vs with-neg ns/op for a realistic query mix.
+const benchSmallNoNeg = `node_modules
+.env.local
+.venv
+target
+dist`
+
+const benchSmallWithNeg = `node_modules/*
+node_modules/**/*
+!node_modules/important
+!node_modules/important/**
+.env.local
+.venv
+target
+dist`
+
+const benchLargeNoNeg = `node_modules
+.venv
+target
+dist
+.next
+build
+out
+__pycache__
+*.pyc
+*.log
+*.tmp
+.aws/credentials
+.ssh/id_rsa
+.ssh/id_ed25519
+.env.local
+.env.production
+.env.*.local
+.idea
+.vscode
+.gradle
+.terraform`
+
+// Mixed query workload: 8 paths covering hits, misses, deep paths, and
+// (for the negation set) re-exposed paths.
+var benchQueries = []string{
+	"node_modules",
+	"a/b/node_modules",
+	"src/main.go",
+	".env.local",
+	"a/x/y/z/something",
+	"deep/nested/.venv",
+	"target",
+	"x/y/dist",
+}
+
+var benchNegQueries = []string{
+	"node_modules/foo",
+	"node_modules/important/index.js", // re-exposed
+	"node_modules/important/sub/deep.ts",
+	".env.local",
+	"src/main.go",
+	"target",
+	"node_modules/bar/inner.js",
+	"x/y/dist",
+}
+
+func BenchmarkMatchSmallNoNeg(b *testing.B) {
+	r, _ := parseRulesReader(strings.NewReader(benchSmallNoNeg))
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = r.Match(queries[i%len(queries)])
+		_ = r.Match(benchQueries[i%len(benchQueries)])
 	}
 }
 
-func BenchmarkMatchGoGitignoreOnly(b *testing.B) {
-	pure := ignore.CompileIgnoreLines("node_modules", ".env.local", ".venv", "target", "dist")
-	queries := []string{
-		"node_modules", "a/b/node_modules", "src/main.go", ".env.local",
-		"a/x/y/z/something", "deep/nested/.venv", "target", "x/y/dist",
-	}
+func BenchmarkMatchSmallWithNeg(b *testing.B) {
+	r, _ := parseRulesReader(strings.NewReader(benchSmallWithNeg))
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = pure.MatchesPath(queries[i%len(queries)])
+		_ = r.Match(benchNegQueries[i%len(benchNegQueries)])
+	}
+}
+
+func BenchmarkMatchLargeNoNeg(b *testing.B) {
+	r, _ := parseRulesReader(strings.NewReader(benchLargeNoNeg))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = r.Match(benchQueries[i%len(benchQueries)])
+	}
+}
+
+// Reference: pure go-gitignore on the same small rule set, no fast-path.
+// Shows the lower bound for "what if we removed the fast-path entirely".
+func BenchmarkMatchGoGitignoreOnly(b *testing.B) {
+	pure := ignore.CompileIgnoreLines("node_modules", ".env.local", ".venv", "target", "dist")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = pure.MatchesPath(benchQueries[i%len(benchQueries)])
 	}
 }
 
