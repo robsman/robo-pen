@@ -4,6 +4,15 @@ image := "robo-pen-default"
 host_dir := invocation_directory()
 host_name := file_name(invocation_directory())
 
+# Pre-built images live at ghcr.io/<owner>/{rp-base,robo-pen-default}.
+# Override RP_REGISTRY_OWNER if you've forked or want to pull from a
+# different namespace. Override RP_IMAGE_TAG to pin a specific release
+# instead of tracking :latest.
+registry_owner := env_var_or_default("RP_REGISTRY_OWNER", "robsman")
+image_tag := env_var_or_default("RP_IMAGE_TAG", "latest")
+ghcr_base := "ghcr.io/" + registry_owner + "/rp-base:" + image_tag
+ghcr_default := "ghcr.io/" + registry_owner + "/robo-pen-default:" + image_tag
+
 # Agent name for THIS workspace, used to disambiguate parallel containers
 # per agent on the same workspace. Resolves at every `just` invocation by
 # asking the rp-fuse host binary for the workspace's .rp/config.yaml agent
@@ -35,11 +44,29 @@ builder_memory := "8G"
 
 # ── Apple container setup ────────────────────────────────────────
 
-# Install Apple Container + jq + just, start system services, bring up the builder
+# Install Apple Container + jq + just, start system services, pull (or
+# build) the rp-base + robo-pen-default images, and bring up the builder.
+#
+# Default path pulls ghcr.io/<owner>/{rp-base,robo-pen-default}:latest —
+# saves ~15 min on first run. Set RP_BUILD_FROM_SOURCE=1 to force local
+# builds instead (needed for dev work on the Dockerfiles themselves).
 setup:
+    #!/usr/bin/env bash
+    set -euo pipefail
     brew install container jq just
     container system start
-    @just builder-ensure
+    just builder-ensure
+    if [ "${RP_BUILD_FROM_SOURCE:-0}" = "1" ]; then
+        echo "rp setup: RP_BUILD_FROM_SOURCE=1 — building images locally" >&2
+        just build
+    else
+        just pull-images || {
+            echo "rp setup: pull failed; falling back to local build" >&2
+            just build
+        }
+    fi
+    echo ""
+    echo "rp setup complete. Try: cd <project> && rp init && rp run"
 
 # Start container system services
 service-start:
@@ -74,18 +101,41 @@ builder-reset:
 
 # ── Image ─────────────────────────────────────────────────────────
 
-# Build rp-base (minimal image with rp-fuse + init script); see ADR-0006
+# Pull pre-built rp-base + robo-pen-default from ghcr.io and re-tag them
+# locally as rp-base + robo-pen-default so the rest of the rp tooling
+# (which references the local tags) just works. Skips images that are
+# already present locally.
+pull-images:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    pull_and_retag() {
+        local remote=$1 local_tag=$2
+        if container image inspect "$local_tag" >/dev/null 2>&1; then
+            echo "rp: $local_tag already present locally, skipping pull" >&2
+            return 0
+        fi
+        echo "rp: pulling $remote" >&2
+        container image pull "$remote"
+        container image tag "$remote" "$local_tag"
+    }
+    pull_and_retag {{ghcr_base}} rp-base
+    pull_and_retag {{ghcr_default}} {{image}}
+
+# Build rp-base locally (minimal image with rp-fuse + init script); see ADR-0006.
+# Most users want `just pull-images` (much faster). Use this when developing
+# on Dockerfile.base or rp-fuse itself.
 build-base: builder-ensure
     container build \
         -f {{justfile_directory()}}/Dockerfile.base \
         -t rp-base \
         {{justfile_directory()}}
 
-# Build the default robo-pen-default image (rp-base + Node/Python/R/DuckDB/just); no agent baked in
+# Build robo-pen-default locally on top of a local rp-base.
 build: build-base
     container build -t {{image}} {{justfile_directory()}}
 
-# Rebuild both rp-base and robo-pen-default from scratch, no cache.
+# Force-rebuild both images from scratch, no cache. Pre-built images on
+# ghcr.io are NOT touched — this is the "I want a fresh local build" recipe.
 rebuild: builder-ensure
     container build --no-cache \
         -f {{justfile_directory()}}/Dockerfile.base \
@@ -93,15 +143,25 @@ rebuild: builder-ensure
         {{justfile_directory()}}
     container build --no-cache -t {{image}} {{justfile_directory()}}
 
-# Cross-build the host-side rp-fuse binary (darwin/arm64), used by `rp lint`
+# Cross-build the host-side rp-fuse binary (darwin/arm64), used by `rp lint`.
+# Release tarballs ship a pre-built binary at the expected path, so this
+# recipe is mainly for development. Set RP_FORCE_BUILD_HOST=1 to rebuild
+# even if a binary is already present.
 build-host:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    HOST_BIN={{justfile_directory()}}/rp-fuse/rp-fuse-darwin-arm64
+    if [ -x "$HOST_BIN" ] && [ "${RP_FORCE_BUILD_HOST:-0}" != "1" ]; then
+        echo "rp: host binary already present at $HOST_BIN (use RP_FORCE_BUILD_HOST=1 to rebuild)" >&2
+        exit 0
+    fi
     container run --rm \
         -v "{{justfile_directory()}}/rp-fuse":/src \
         -w /src \
         -e GOOS=darwin -e GOARCH=arm64 -e CGO_ENABLED=0 \
         golang:1.22-alpine \
         go build -o /src/rp-fuse-darwin-arm64 -ldflags "-s -w" .
-    @echo "Built {{justfile_directory()}}/rp-fuse/rp-fuse-darwin-arm64"
+    echo "Built $HOST_BIN"
 
 # Run the host-side shell integration tests (profile loader, lint, env-forwarding)
 test-host: build-host

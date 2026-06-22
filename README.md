@@ -20,25 +20,39 @@ Requires Apple Silicon + macOS 26+.
 
 - Apple Silicon Mac (M1 or newer), macOS 26+
 - [Homebrew](https://brew.sh)
-- `brew install container jq just`
 - An account with the agent vendor (Claude Pro/Max subscription for claude-code, etc.) or the matching API key
 
 ---
 
-## One-time setup
+## Install
+
+### Via Homebrew (recommended)
+
+```bash
+brew install robsman/tap/robo-pen
+rp setup
+```
+
+`rp setup` installs Apple Container + `jq` + `just`, starts the container service, brings up the builder VM, and pulls the pre-built `rp-base` + `robo-pen-default` images from GHCR (~1.5 GB, one-time). Subsequent invocations are instant.
+
+### Build images locally instead of pulling
+
+If you're developing on the Dockerfiles or want fully reproducible images:
+
+```bash
+RP_BUILD_FROM_SOURCE=1 rp setup       # ~15 min on a current Mac
+```
+
+### From source (for rp development)
 
 ```bash
 git clone https://github.com/robsman/robo-pen.git ~/repos/robo-pen
 cd ~/repos/robo-pen
-./rp setup           # installs Apple Container + jq + just, starts services + the builder VM
-./rp build-base      # builds the rp-base image (small; required for any project image)
-./rp build           # builds the default robo-pen-default image
-./rp build-host      # cross-builds the host-side rp-fuse binary (used by `rp lint` + project image builds)
+./rp setup            # same as above; pulls pre-built images by default
+ln -s "$(pwd)/rp" ~/.local/bin/rp     # put rp on PATH
 ```
 
 The builder VM is a long-lived Apple Container that runs all `container build` invocations. `rp setup` brings it up at the size given by `builder_memory` in the Justfile (default 8G). To change the size later, edit the Justfile and run `rp builder-reset` — `container build -m` does NOT renegotiate a running builder.
-
-Then put `rp` on your `PATH` (symlink it into `/usr/local/bin` or add the repo dir to `PATH`). If you cloned somewhere other than `~/repos/robo-pen`, set `ROBO_PEN_DIR` to the actual path.
 
 ---
 

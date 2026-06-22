@@ -1,0 +1,165 @@
+name: release
+
+# Triggered by pushing a tag like v0.1.0. Produces three artifacts:
+#   1. host rp-fuse binary for darwin/arm64 (so `rp lint` works without a
+#      local Go toolchain).
+#   2. linux/arm64 OCI images pushed to ghcr.io/<owner>/rp-base and
+#      ghcr.io/<owner>/robo-pen-default (so `rp setup` can pull instead of
+#      build).
+#   3. GitHub release with a source tarball + the host binary attached.
+#
+# The image namespace follows ${{ github.repository_owner }}, so a fork at
+# github.com/<alice>/robo-pen pushes to ghcr.io/alice/{rp-base,robo-pen-default}.
+# Pull access is public for free public repos.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_BASE: ${{ github.repository_owner }}/rp-base
+  IMAGE_DEFAULT: ${{ github.repository_owner }}/robo-pen-default
+
+jobs:
+  # --- Cross-build the host-side rp-fuse binary (darwin/arm64). ---
+  # Static, CGO_ENABLED=0 means we can compile this anywhere — using ubuntu
+  # for cheap minutes.
+  host-binary:
+    name: Build host rp-fuse (darwin/arm64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: go build
+        working-directory: rp-fuse
+        env:
+          GOOS: darwin
+          GOARCH: arm64
+          CGO_ENABLED: '0'
+        run: |
+          go build -o ../dist/rp-fuse-darwin-arm64 -ldflags '-s -w' .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rp-fuse-darwin-arm64
+          path: dist/rp-fuse-darwin-arm64
+          if-no-files-found: error
+
+  # --- Build + push rp-base (linux/arm64). ---
+  # Apple Container runs natively on Apple Silicon, so we ship arm64 only.
+  # Build runs on ubuntu-24.04-arm (native arm64 runner) to avoid qemu
+  # emulation; ~3 min on a native runner vs ~15 min emulated.
+  image-base:
+    name: Build & push rp-base
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Derive tags
+        id: meta
+        run: |
+          echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.base
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}:${{ steps.meta.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}:latest
+
+  # --- Build + push robo-pen-default (linux/arm64). FROMs rp-base, so it
+  # depends on the prior job pushing the tag we read from.
+  image-default:
+    name: Build & push robo-pen-default
+    runs-on: ubuntu-24.04-arm
+    needs: image-base
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Derive tags
+        id: meta
+        run: |
+          echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+      # robo-pen-default's Dockerfile says `FROM rp-base` (local tag). We
+      # need it to FROM the just-pushed registry image instead. Swap the
+      # FROM line in a temp Dockerfile to keep the working tree clean.
+      - name: Rewrite FROM to use ghcr.io image
+        run: |
+          sed -i "s|^FROM rp-base.*$|FROM ${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}:${{ steps.meta.outputs.version }}|" Dockerfile
+          head -10 Dockerfile
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_DEFAULT }}:${{ steps.meta.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_DEFAULT }}:latest
+
+  # --- Create the GitHub release with source tarball + host binary. ---
+  release:
+    name: GitHub Release
+    runs-on: ubuntu-latest
+    needs: [host-binary, image-base, image-default]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: rp-fuse-darwin-arm64
+          path: dist
+      - name: Stage release tarball
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          mkdir -p stage/robo-pen-${VERSION}
+          # Files needed at runtime by the rp wrapper + Justfile recipes.
+          cp -R rp Justfile Dockerfile Dockerfile.base \
+                .rp.example \
+                agent.profiles config docs examples \
+                rp-fuse rp-init-bootstrap scripts tests \
+                CONTEXT.md CLAUDE.md README.md \
+                "stage/robo-pen-${VERSION}/"
+          # rp-fuse darwin binary pre-built so `rp lint` works out of the
+          # box (no local Go toolchain needed).
+          cp dist/rp-fuse-darwin-arm64 "stage/robo-pen-${VERSION}/rp-fuse/rp-fuse-darwin-arm64"
+          chmod +x "stage/robo-pen-${VERSION}/rp-fuse/rp-fuse-darwin-arm64"
+          cd stage && tar -czf "../robo-pen-${VERSION}.tar.gz" "robo-pen-${VERSION}"
+      - name: Compute checksum
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          sha256sum "robo-pen-${VERSION}.tar.gz" > "robo-pen-${VERSION}.tar.gz.sha256"
+          cat "robo-pen-${VERSION}.tar.gz.sha256"
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          gh release create "$VERSION" \
+            --title "robo-pen $VERSION" \
+            --notes "Pre-built images: \`ghcr.io/${{ env.IMAGE_BASE }}:$VERSION\`, \`ghcr.io/${{ env.IMAGE_DEFAULT }}:$VERSION\`. Install via Homebrew: \`brew install robsman/tap/robo-pen\`." \
+            "robo-pen-${VERSION}.tar.gz" \
+            "robo-pen-${VERSION}.tar.gz.sha256" \
+            "dist/rp-fuse-darwin-arm64"
