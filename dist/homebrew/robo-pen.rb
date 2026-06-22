@@ -11,8 +11,8 @@
 class RoboPen < Formula
   desc "Run coding agents inside isolated Apple Container sandboxes (Claude Code, OpenCode, …)"
   homepage "https://github.com/robsman/robo-pen"
-  url "https://github.com/robsman/robo-pen/releases/download/v0.1.1/robo-pen-v0.1.1.tar.gz"
-  sha256 "12179ce8f2aa3fea304b9cf0c0306268c6297cc83209234a639babce2caa4ba3"
+  url "https://github.com/robsman/robo-pen/releases/download/v0.1.2/robo-pen-v0.1.2.tar.gz"
+  sha256 "40eecf88ddd8e9c8899d5c068641d228d9dc8bdba5a59e3baa725b0397ce68b4"
   license "MIT"
 
   # Apple Container only runs on Apple Silicon + macOS 26+. We declare the
