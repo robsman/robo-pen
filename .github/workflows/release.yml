@@ -163,3 +163,24 @@ jobs:
             "robo-pen-${VERSION}.tar.gz" \
             "robo-pen-${VERSION}.tar.gz.sha256" \
             "dist/rp-fuse-darwin-arm64"
+
+  # --- Bump the Homebrew formula in robsman/homebrew-tap. Recomputes
+  # sha256 from the published tarball and commits the bump directly
+  # (no PR — the change is mechanical, nothing to review). Needs a PAT
+  # in the HOMEBREW_TAP_TOKEN secret with `repo` scope on the tap repo.
+  publish-formula:
+    name: Bump Homebrew formula
+    runs-on: ubuntu-latest
+    needs: release
+    permissions:
+      contents: read
+    steps:
+      - uses: mislav/bump-homebrew-formula-action@v3
+        with:
+          formula-name: robo-pen
+          formula-path: Formula/robo-pen.rb
+          homebrew-tap: robsman/homebrew-tap
+          base-branch: main
+          download-url: https://github.com/robsman/robo-pen/releases/download/${{ github.ref_name }}/robo-pen-${{ github.ref_name }}.tar.gz
+        env:
+          COMMITTER_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
