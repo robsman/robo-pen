@@ -276,6 +276,30 @@ func lintProfile(workspace, repoDir, agent string, cfg *ProjectConfig, exitCode 
 			fmt.Printf("  INFO env %s declared by profile but unset on host\n", v)
 		}
 	}
+
+	// Show host_files / host_keychain imports so users see what gets
+	// copied at create-time and can flag missing sources before running.
+	if len(m.HostFiles) > 0 {
+		fmt.Printf("  host_files:\n")
+		for _, h := range m.HostFiles {
+			expanded := strings.ReplaceAll(h.Src, "~", os.Getenv("HOME"))
+			marker := "OK"
+			if _, err := os.Stat(expanded); err != nil {
+				if h.IfMissing == "error" {
+					marker = "ERR (if_missing=error)"
+				} else {
+					marker = "MISSING (will skip)"
+				}
+			}
+			fmt.Printf("    - %s → %s [%s]\n", h.Src, h.Dst, marker)
+		}
+	}
+	if len(m.HostKeychain) > 0 {
+		fmt.Printf("  host_keychain:\n")
+		for _, k := range m.HostKeychain {
+			fmt.Printf("    - %s → %s (mode %s)\n", k.Service, k.Dst, firstNonEmpty(k.Mode, "0600"))
+		}
+	}
 }
 
 func describe(e LintEntry) string {

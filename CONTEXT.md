@@ -52,6 +52,14 @@ _Avoid_: rp layer, decorator layer.
 A directory inside the container that survives `rp destroy && rp create`. Declared in a profile manifest's `volumes:` block as `{name, mount}`; `mount` is relative to the container user's home. Host backing lives at `$RP_VOLUMES_DIR/<container-name>/<volume-name>/` (default `~/.local/share/robo-pen/volumes`). Used for state the agent writes during a session that should carry over: login tokens, history files, agent-local caches. The first `rp create` seeds an empty volume from `/usr/local/share/rp/seed/<name>/` (the build routes profile `files:` whose `dst` falls inside a volume mount into the seed instead of the mount, so defaults survive being shadowed by the bind). `rp purge` wipes the volume root. See ADR-0014.
 _Avoid_: named volume (overloaded by container runtimes), home volume (overspecific).
 
+**Host file import**:
+A file or directory copied from the host into the container at `rp create` time, declared in a profile manifest's `host_files:` block. `src` is a host path (`~` expands to host's `$HOME`); `dst` is an absolute in-container path. Volume-backed dsts write directly to the host volume backing dir; non-volume dsts go through `container cp` into the container's writable layer. Missing host sources skip silently (default) or fail with `if_missing: error`. Re-applied on every `rp create`; agent writes to volume paths NOT in `host_files` persist across destroy+create. See ADR-0015.
+_Avoid_: host bind (already a workspace term), seed file (overloaded with the volume-seed mechanism in ADR-0014).
+
+**Host keychain import**:
+A macOS Keychain entry exported via `security find-generic-password -s <service> -w` at `rp create` time, written to a file inside the container. Declared in a profile manifest's `host_keychain:` block. Used for Claude Code login (`security find-generic-password -s "Claude Code-credentials"`); the file Claude Code reads on non-macOS hosts. macOS-only; falls back to `skip` (or `error`) on other hosts.
+_Avoid_: keychain mount (no mount happens), credentials volume (this is per-file).
+
 **Host alias**:
 An `/etc/hosts` entry inside the container that resolves a chosen name to either the container's default gateway (the host) or a fixed IPv4. Declared in `.rp/config.yaml` under `host_aliases:`. `host.containers.internal` is always injected automatically (matches ai-pod / Podman / Docker convention). Apple Container has no `--add-host` equivalent, so init.sh appends entries to `/etc/hosts` after the network is up — see ADR-0013.
 _Avoid_: host gateway alias (overspecific), host bind (already a workspace term).

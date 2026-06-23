@@ -22,13 +22,38 @@ import (
 
 // ProfileManifest is the parsed contents of a profile's manifest.yaml.
 type ProfileManifest struct {
-	Name            string          `yaml:"name"`
-	Description     string          `yaml:"description,omitempty"`
-	Env             []string        `yaml:"env,omitempty"`
-	Files           []ProfileFile   `yaml:"files,omitempty"`
-	InstructionsDst string          `yaml:"instructions_dst,omitempty"`
-	Entrypoints     ProfileEntries  `yaml:"entrypoints,omitempty"`
-	Volumes         []ProfileVolume `yaml:"volumes,omitempty"`
+	Name            string             `yaml:"name"`
+	Description     string             `yaml:"description,omitempty"`
+	Env             []string           `yaml:"env,omitempty"`
+	Files           []ProfileFile      `yaml:"files,omitempty"`
+	InstructionsDst string             `yaml:"instructions_dst,omitempty"`
+	Entrypoints     ProfileEntries     `yaml:"entrypoints,omitempty"`
+	Volumes         []ProfileVolume    `yaml:"volumes,omitempty"`
+	HostFiles       []HostFile         `yaml:"host_files,omitempty"`
+	HostKeychain    []KeychainImport   `yaml:"host_keychain,omitempty"`
+}
+
+// HostFile declares a file/dir on the host to be copied into the container at
+// `rp create` time. Src is a host path (`~` expands to $HOME of the user
+// invoking rp); Dst is an absolute in-container path with optional
+// `{{user}}` templating. If the host source doesn't exist:
+//   - if_missing: skip (default) → log INFO, continue
+//   - if_missing: error          → fail rp create
+type HostFile struct {
+	Src       string `yaml:"src"`
+	Dst       string `yaml:"dst"`
+	IfMissing string `yaml:"if_missing,omitempty"`
+}
+
+// KeychainImport runs `security find-generic-password -s <service> -w` on
+// the host (macOS Keychain) and writes the result to Dst inside the
+// container. Mode is the file mode (default 0600). macOS-only; on other
+// hosts the entry is treated as missing.
+type KeychainImport struct {
+	Service   string `yaml:"service"`
+	Dst       string `yaml:"dst"`
+	Mode      string `yaml:"mode,omitempty"`
+	IfMissing string `yaml:"if_missing,omitempty"`
 }
 
 // ProfileVolume declares a persistent path inside the container that
@@ -160,6 +185,42 @@ func (m *ProfileManifest) Validate() error {
 	if m.InstructionsDst != "" && !filepath.IsAbs(m.InstructionsDst) {
 		return fmt.Errorf("manifest: instructions_dst %q must be absolute", m.InstructionsDst)
 	}
+	for i, h := range m.HostFiles {
+		if h.Src == "" {
+			return fmt.Errorf("manifest: host_files[%d]: src is required", i)
+		}
+		if !strings.HasPrefix(h.Src, "~") && !filepath.IsAbs(h.Src) {
+			return fmt.Errorf("manifest: host_files[%d].src %q must be absolute or start with `~` (host home)", i, h.Src)
+		}
+		if h.Dst == "" {
+			return fmt.Errorf("manifest: host_files[%d]: dst is required", i)
+		}
+		if !filepath.IsAbs(h.Dst) {
+			return fmt.Errorf("manifest: host_files[%d].dst %q must be absolute", i, h.Dst)
+		}
+		if err := validateIfMissing(h.IfMissing); err != nil {
+			return fmt.Errorf("manifest: host_files[%d].if_missing: %w", i, err)
+		}
+	}
+	for i, k := range m.HostKeychain {
+		if k.Service == "" {
+			return fmt.Errorf("manifest: host_keychain[%d]: service is required", i)
+		}
+		if k.Dst == "" {
+			return fmt.Errorf("manifest: host_keychain[%d]: dst is required", i)
+		}
+		if !filepath.IsAbs(k.Dst) {
+			return fmt.Errorf("manifest: host_keychain[%d].dst %q must be absolute", i, k.Dst)
+		}
+		if k.Mode != "" {
+			if err := validateFileMode(k.Mode); err != nil {
+				return fmt.Errorf("manifest: host_keychain[%d].mode: %w", i, err)
+			}
+		}
+		if err := validateIfMissing(k.IfMissing); err != nil {
+			return fmt.Errorf("manifest: host_keychain[%d].if_missing: %w", i, err)
+		}
+	}
 	volNames := map[string]int{}
 	for i, v := range m.Volumes {
 		if v.Name == "" {
@@ -202,6 +263,29 @@ func (m *ProfileManifest) Validate() error {
 		}
 		if strings.Contains(ep, "..") {
 			return fmt.Errorf("manifest: entrypoints.%s %q must not contain `..`", kind, ep)
+		}
+	}
+	return nil
+}
+
+// validateIfMissing accepts the strings "", "skip", or "error". Empty
+// means "use the default" (skip).
+func validateIfMissing(s string) error {
+	switch s {
+	case "", "skip", "error":
+		return nil
+	}
+	return fmt.Errorf("must be skip or error, got %q", s)
+}
+
+// validateFileMode accepts an octal mode string (3 or 4 digits, each 0-7).
+func validateFileMode(s string) error {
+	if len(s) < 3 || len(s) > 4 {
+		return fmt.Errorf("mode %q must be 3 or 4 octal digits", s)
+	}
+	for _, r := range s {
+		if r < '0' || r > '7' {
+			return fmt.Errorf("non-octal digit %q in mode %q", r, s)
 		}
 	}
 	return nil

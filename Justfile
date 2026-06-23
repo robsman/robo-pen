@@ -390,7 +390,12 @@ _ensure:
             ${extra_args[@]+"${extra_args[@]}"} \
             "$IMAGE_TAG" > /dev/null
         echo "Auto-created container $CONT_NAME -> $WS_PRIMARY (image $IMAGE_TAG${CREATE_FLAGS:+, $CREATE_FLAGS})" >&2
+        # Mark for first-time seeding: the post-start block below copies
+        # host_files / host_keychain entries into the container once it
+        # finishes booting. See ADR-0015.
+        seed_after_start=1
     else
+        seed_after_start=0
         recorded=$(container inspect "$CONT_NAME" 2>/dev/null | jq -r '.[0].configuration.labels["rp.host_path"] // empty')
         if [ -n "$recorded" ] && [ "$recorded" != "$WS_PRIMARY" ]; then
             echo "ERROR: container $CONT_NAME is bound to: $recorded" >&2
@@ -404,6 +409,13 @@ _ensure:
     state=$(container inspect "$CONT_NAME" 2>/dev/null | jq -r '.[0].status.state' || true)
     if [ "$state" != "running" ]; then
         container start "$CONT_NAME" > /dev/null
+    fi
+    # Seed host files / Keychain into the just-started container if this
+    # was a fresh create. Idempotent if re-run (overwrites with the same
+    # content), but cheap to skip for the warm-start path.
+    if [ "${seed_after_start:-0}" = "1" ]; then
+        {{justfile_directory()}}/scripts/seed-host-files.sh \
+            "$WS_PRIMARY" "$AGENT" "$CONT_NAME" "$USER_NAME"
     fi
 
 # Create a new container with one or more workspaces bound 1:1 (host path
@@ -461,6 +473,11 @@ create:
         "${bind_args[@]}" \
         ${extra_args[@]+"${extra_args[@]}"} \
         "$IMAGE_TAG"
+    # Start so we can `container cp` host files into the running container
+    # (Apple Container's cp requires state=running). See ADR-0015.
+    container start "$CONT_NAME" > /dev/null
+    {{justfile_directory()}}/scripts/seed-host-files.sh \
+        "$WS_PRIMARY" "$AGENT" "$CONT_NAME" "$USER_NAME"
     echo "Container $CONT_NAME created. Workspaces: $RP_WORKSPACE_ENV (image $IMAGE_TAG${CREATE_FLAGS:+, $CREATE_FLAGS})"
 
 # Start a stopped container

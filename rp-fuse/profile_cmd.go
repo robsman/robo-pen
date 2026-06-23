@@ -167,6 +167,33 @@ func profileManifestField(m *ProfileManifest, name string) (string, error) {
 			lines = append(lines, v.Name+"\t"+v.Mount)
 		}
 		return strings.Join(lines, "\n"), nil
+	case "host_files":
+		// One line per entry: "src\tdst\tif_missing". if_missing defaults
+		// to "skip" so the shell consumer doesn't have to.
+		var lines []string
+		for _, h := range m.HostFiles {
+			ifm := h.IfMissing
+			if ifm == "" {
+				ifm = "skip"
+			}
+			lines = append(lines, h.Src+"\t"+h.Dst+"\t"+ifm)
+		}
+		return strings.Join(lines, "\n"), nil
+	case "host_keychain":
+		// One line per entry: "service\tdst\tmode\tif_missing".
+		var lines []string
+		for _, k := range m.HostKeychain {
+			mode := k.Mode
+			if mode == "" {
+				mode = "0600"
+			}
+			ifm := k.IfMissing
+			if ifm == "" {
+				ifm = "skip"
+			}
+			lines = append(lines, k.Service+"\t"+k.Dst+"\t"+mode+"\t"+ifm)
+		}
+		return strings.Join(lines, "\n"), nil
 	}
 	return "", fmt.Errorf("unknown field %q", name)
 }

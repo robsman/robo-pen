@@ -15,6 +15,30 @@ instructions_dst: /home/{{user}}/.claude/CLAUDE.md
 volumes:
   - name: claude-home
     mount: .claude
+# Host file imports — copied from the host at `rp create` time so the
+# user's existing claude / git config carries into the container without
+# manual re-setup. Missing host sources are logged + skipped (if_missing:
+# skip is the default). All destinations under /home/{{user}}/.claude/
+# land in the persistent claude-home volume (see ADR-0014) so they
+# survive `rp destroy && rp create` alongside agent writes. See ADR-0015.
+host_files:
+  - src: ~/.claude.json
+    dst: /home/{{user}}/.claude.json
+  - src: ~/.claude/settings.json
+    dst: /home/{{user}}/.claude/settings.json
+  - src: ~/.claude/CLAUDE.md
+    dst: /home/{{user}}/.claude/CLAUDE.md
+  - src: ~/.gitconfig
+    dst: /home/{{user}}/.gitconfig
+  - src: ~/.npmrc
+    dst: /home/{{user}}/.npmrc
+# macOS Keychain — the actual login. Without this, the user has to run
+# `claude login` inside the container at least once (the volume then
+# preserves /home/{{user}}/.claude/.credentials.json across destroy).
+host_keychain:
+  - service: Claude Code-credentials
+    dst: /home/{{user}}/.claude/.credentials.json
+    mode: "0600"
 entrypoints:
   install: install.sh
   run: run.sh

@@ -381,3 +381,117 @@ volumes:
 		t.Errorf("volumes accessor = %q", got)
 	}
 }
+
+func TestProfileManifest_HostFilesParse(t *testing.T) {
+	m, err := parseProfileManifestBytes([]byte(`name: foo
+host_files:
+  - src: ~/.claude.json
+    dst: /home/{{user}}/.claude.json
+  - src: ~/.gitconfig
+    dst: /home/{{user}}/.gitconfig
+    if_missing: skip
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.HostFiles) != 2 {
+		t.Fatalf("expected 2 host_files, got %v", m.HostFiles)
+	}
+	if m.HostFiles[0].Src != "~/.claude.json" || m.HostFiles[0].Dst != "/home/{{user}}/.claude.json" {
+		t.Errorf("host_files[0] = %+v", m.HostFiles[0])
+	}
+}
+
+func TestProfileManifest_HostFilesRejectRelativeSrc(t *testing.T) {
+	_, err := parseProfileManifestBytes([]byte(`name: foo
+host_files:
+  - src: .relative
+    dst: /home/u/.relative
+`))
+	if err == nil {
+		t.Error("expected error on relative src (no ~/ prefix, no absolute)")
+	}
+}
+
+func TestProfileManifest_HostFilesRejectRelativeDst(t *testing.T) {
+	_, err := parseProfileManifestBytes([]byte(`name: foo
+host_files:
+  - src: ~/.x
+    dst: relative-dst
+`))
+	if err == nil {
+		t.Error("expected error on relative dst")
+	}
+}
+
+func TestProfileManifest_HostFilesIfMissingValidation(t *testing.T) {
+	_, err := parseProfileManifestBytes([]byte(`name: foo
+host_files:
+  - src: ~/.x
+    dst: /h/.x
+    if_missing: maybe
+`))
+	if err == nil {
+		t.Error("expected error on if_missing != skip|error")
+	}
+}
+
+func TestProfileManifest_HostKeychainParse(t *testing.T) {
+	m, err := parseProfileManifestBytes([]byte(`name: foo
+host_keychain:
+  - service: Claude Code-credentials
+    dst: /home/{{user}}/.claude/.credentials.json
+    mode: "0600"
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.HostKeychain) != 1 {
+		t.Fatalf("expected 1 keychain entry, got %v", m.HostKeychain)
+	}
+	if m.HostKeychain[0].Service != "Claude Code-credentials" {
+		t.Errorf("service = %q", m.HostKeychain[0].Service)
+	}
+}
+
+func TestProfileManifest_HostKeychainRejectBadMode(t *testing.T) {
+	_, err := parseProfileManifestBytes([]byte(`name: foo
+host_keychain:
+  - service: x
+    dst: /h/.x
+    mode: "099"
+`))
+	if err == nil {
+		t.Error("expected error on non-octal mode")
+	}
+}
+
+func TestProfileManifest_HostFilesFieldAccessor(t *testing.T) {
+	m, _ := parseProfileManifestBytes([]byte(`name: foo
+host_files:
+  - src: ~/.x
+    dst: /h/.x
+`))
+	got, err := profileManifestField(m, "host_files")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "~/.x\t/h/.x\tskip" {
+		t.Errorf("host_files accessor = %q (expected default if_missing=skip)", got)
+	}
+}
+
+func TestProfileManifest_HostKeychainFieldAccessor(t *testing.T) {
+	m, _ := parseProfileManifestBytes([]byte(`name: foo
+host_keychain:
+  - service: My Service
+    dst: /h/.creds
+`))
+	got, err := profileManifestField(m, "host_keychain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "My Service\t/h/.creds\t0600\tskip" {
+		t.Errorf("host_keychain accessor = %q (expected defaults mode=0600 if_missing=skip)", got)
+	}
+}
