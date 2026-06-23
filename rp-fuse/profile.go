@@ -22,12 +22,28 @@ import (
 
 // ProfileManifest is the parsed contents of a profile's manifest.yaml.
 type ProfileManifest struct {
-	Name            string         `yaml:"name"`
-	Description     string         `yaml:"description,omitempty"`
-	Env             []string       `yaml:"env,omitempty"`
-	Files           []ProfileFile  `yaml:"files,omitempty"`
-	InstructionsDst string         `yaml:"instructions_dst,omitempty"`
-	Entrypoints     ProfileEntries `yaml:"entrypoints,omitempty"`
+	Name            string          `yaml:"name"`
+	Description     string          `yaml:"description,omitempty"`
+	Env             []string        `yaml:"env,omitempty"`
+	Files           []ProfileFile   `yaml:"files,omitempty"`
+	InstructionsDst string          `yaml:"instructions_dst,omitempty"`
+	Entrypoints     ProfileEntries  `yaml:"entrypoints,omitempty"`
+	Volumes         []ProfileVolume `yaml:"volumes,omitempty"`
+}
+
+// ProfileVolume declares a persistent path inside the container that
+// survives `rp destroy && rp create`. Used for state the agent writes
+// during a session that should carry over: login tokens (~/.claude),
+// history files, agent-local caches.
+//
+// Host-side backing lives at $RP_VOLUMES_DIR/<container-name>/<volume-name>/
+// (default RP_VOLUMES_DIR = ~/.local/share/robo-pen/volumes). Mounted into
+// the container at /home/{{user}}/<Mount>. `Mount` MUST be a relative path
+// (an absolute path would let a profile shadow arbitrary locations, e.g.
+// /etc — out of scope; see Validate).
+type ProfileVolume struct {
+	Name  string `yaml:"name"`
+	Mount string `yaml:"mount"`
 }
 
 // ProfileFile lists a static file to copy into the image at build time.
@@ -144,6 +160,34 @@ func (m *ProfileManifest) Validate() error {
 	if m.InstructionsDst != "" && !filepath.IsAbs(m.InstructionsDst) {
 		return fmt.Errorf("manifest: instructions_dst %q must be absolute", m.InstructionsDst)
 	}
+	volNames := map[string]int{}
+	for i, v := range m.Volumes {
+		if v.Name == "" {
+			return fmt.Errorf("manifest: volumes[%d]: name is required", i)
+		}
+		if err := validateVolumeName(v.Name); err != nil {
+			return fmt.Errorf("manifest: volumes[%d].name: %w", i, err)
+		}
+		if dup, ok := volNames[v.Name]; ok {
+			return fmt.Errorf("manifest: volumes[%d].name %q duplicates volumes[%d]", i, v.Name, dup)
+		}
+		volNames[v.Name] = i
+		if v.Mount == "" {
+			return fmt.Errorf("manifest: volumes[%d]: mount is required", i)
+		}
+		if filepath.IsAbs(v.Mount) {
+			return fmt.Errorf("manifest: volumes[%d].mount %q must be relative to the container user's home", i, v.Mount)
+		}
+		if strings.Contains(v.Mount, "..") {
+			return fmt.Errorf("manifest: volumes[%d].mount %q must not contain `..`", i, v.Mount)
+		}
+		// Disallow leading slash already covered by IsAbs; also reject any
+		// rooted-looking variants like `./..`/leading-dot-segments.
+		clean := filepath.Clean(v.Mount)
+		if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+			return fmt.Errorf("manifest: volumes[%d].mount %q resolves outside the home directory", i, v.Mount)
+		}
+	}
 	for kind, ep := range map[string]string{
 		EntrypointInstall:  m.Entrypoints.Install,
 		EntrypointRun:      m.Entrypoints.Run,
@@ -159,6 +203,27 @@ func (m *ProfileManifest) Validate() error {
 		if strings.Contains(ep, "..") {
 			return fmt.Errorf("manifest: entrypoints.%s %q must not contain `..`", kind, ep)
 		}
+	}
+	return nil
+}
+
+// validateVolumeName accepts lowercase alphanumeric + dashes; same shape as
+// container names. Volume name is used as a directory under
+// $RP_VOLUMES_DIR/<container>/, so we forbid `.`, `..`, slashes, spaces.
+func validateVolumeName(name string) error {
+	if name == "" {
+		return errors.New("empty")
+	}
+	for i, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z':
+			continue
+		case r >= '0' && r <= '9' && i > 0:
+			continue
+		case r == '-' && i > 0:
+			continue
+		}
+		return fmt.Errorf("invalid character %q in volume name %q (lowercase, digits, hyphens; cannot start with digit or hyphen)", r, name)
 	}
 	return nil
 }

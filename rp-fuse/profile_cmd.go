@@ -160,6 +160,13 @@ func profileManifestField(m *ProfileManifest, name string) (string, error) {
 			lines = append(lines, f.Src+"\t"+f.Dst)
 		}
 		return strings.Join(lines, "\n"), nil
+	case "volumes":
+		// One line per volume: "name\tmount" (mount is relative to /home/<user>/).
+		var lines []string
+		for _, v := range m.Volumes {
+			lines = append(lines, v.Name+"\t"+v.Mount)
+		}
+		return strings.Join(lines, "\n"), nil
 	}
 	return "", fmt.Errorf("unknown field %q", name)
 }

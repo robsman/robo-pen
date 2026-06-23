@@ -60,6 +60,7 @@ func main() {
 	rpDiagnose, hasRPDiagnose := os.LookupEnv("RP_DIAGNOSE")
 	rpAllowSudo, hasRPAllowSudo := os.LookupEnv("RP_ALLOW_SUDO")
 	rpHostAliases, hasRPHostAliases := os.LookupEnv("RP_HOST_ALIASES")
+	rpVolumes, hasRPVolumes := os.LookupEnv("RP_VOLUMES")
 
 	os.Clearenv()
 	os.Setenv("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
@@ -88,6 +89,9 @@ func main() {
 	}
 	if hasRPHostAliases {
 		os.Setenv("RP_HOST_ALIASES", rpHostAliases)
+	}
+	if hasRPVolumes {
+		os.Setenv("RP_VOLUMES", rpVolumes)
 	}
 
 	// Hardcoded target + no argv passthrough. Audit surface ends here.

@@ -5,6 +5,16 @@ files:
   - src: settings/settings.json
     dst: /home/{{user}}/.claude/settings.json
 instructions_dst: /home/{{user}}/.claude/CLAUDE.md
+# Persistent volume — survives `rp destroy && rp create` so `claude login`
+# writes (~/.claude/.credentials.json, session state, indexes) are
+# preserved. The volume mount shadows the in-image /home/{{user}}/.claude
+# at runtime, so build-project-image.sh routes the `files:` + the
+# composed instructions_dst into /usr/local/share/rp/seed/claude-home/
+# instead; rp-init.sh copies them into the mounted volume on first
+# launch (volume is empty on first create). See ADR-0014.
+volumes:
+  - name: claude-home
+    mount: .claude
 entrypoints:
   install: install.sh
   run: run.sh

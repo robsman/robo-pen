@@ -312,3 +312,72 @@ func writeManifest(t *testing.T, path, content string) {
 		t.Fatal(err)
 	}
 }
+
+func TestProfileManifest_VolumesParse(t *testing.T) {
+	m, err := parseProfileManifestBytes([]byte(`name: foo
+volumes:
+  - name: claude-home
+    mount: .claude
+  - name: zsh-state
+    mount: .local/share/zsh
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Volumes) != 2 {
+		t.Fatalf("expected 2 volumes, got %v", m.Volumes)
+	}
+	if m.Volumes[0] != (ProfileVolume{Name: "claude-home", Mount: ".claude"}) {
+		t.Errorf("volume[0] = %+v", m.Volumes[0])
+	}
+}
+
+func TestProfileManifest_VolumeRejectAbsoluteMount(t *testing.T) {
+	_, err := parseProfileManifestBytes([]byte(`name: foo
+volumes:
+  - name: bad
+    mount: /etc
+`))
+	if err == nil {
+		t.Error("expected error on absolute mount path")
+	}
+}
+
+func TestProfileManifest_VolumeRejectDotDotMount(t *testing.T) {
+	_, err := parseProfileManifestBytes([]byte(`name: foo
+volumes:
+  - name: bad
+    mount: ../../escape
+`))
+	if err == nil {
+		t.Error("expected error on .. in mount path")
+	}
+}
+
+func TestProfileManifest_VolumeRejectDuplicateName(t *testing.T) {
+	_, err := parseProfileManifestBytes([]byte(`name: foo
+volumes:
+  - name: home
+    mount: .a
+  - name: home
+    mount: .b
+`))
+	if err == nil {
+		t.Error("expected error on duplicate volume name")
+	}
+}
+
+func TestProfileManifest_VolumesFieldAccessor(t *testing.T) {
+	m, _ := parseProfileManifestBytes([]byte(`name: foo
+volumes:
+  - name: claude-home
+    mount: .claude
+`))
+	got, err := profileManifestField(m, "volumes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "claude-home\t.claude" {
+		t.Errorf("volumes accessor = %q", got)
+	}
+}

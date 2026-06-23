@@ -193,6 +193,48 @@ fi
 
 INSTRUCTIONS_DST=$("$RP_FUSE" profile --workspace "$WORKSPACE" --repo-dir "$REPO_DIR" --agent "$AGENT" field instructions_dst || true)
 
+# Volume declarations from the profile manifest (name\tmount, one per
+# line). Mount paths are relative to /home/<user>/ and absolute-anchor
+# the in-container mount point. Files/instructions whose dst falls
+# INSIDE any volume mount path are routed to a seed location at build
+# time; rp-init.sh copies them into the mounted volume on first launch
+# (volume is empty on first create).
+VOLUMES_LINES=$("$RP_FUSE" profile --workspace "$WORKSPACE" --repo-dir "$REPO_DIR" --agent "$AGENT" field volumes || true)
+SEED_ROOT=/usr/local/share/rp/seed
+
+# expand_user_template substitutes {{user}} in a string. Returns absolute
+# in-container path.
+expand_user_template() {
+    printf '%s' "${1//\{\{user\}\}/$RP_USER}"
+}
+
+# volume_seed_target answers: if $expanded_dst is inside any volume's
+# mount path (under /home/$RP_USER/<mount>), echo the seed location and
+# the volume name (TSV); else echo empty. Mount comparison is purely
+# textual (no symlink resolution) — manifest validation already rejects
+# `..` segments.
+volume_seed_target() {
+    local expanded_dst=$1
+    local home_prefix="/home/$RP_USER/"
+    case "$expanded_dst" in
+        "$home_prefix"*) ;;
+        *) return 0 ;;  # outside any volume's possible mount root
+    esac
+    local rel_to_home=${expanded_dst#"$home_prefix"}
+    while IFS=$'\t' read -r vol_name vol_mount; do
+        [ -z "$vol_name" ] && continue
+        # Match if rel_to_home equals vol_mount or starts with vol_mount/.
+        if [ "$rel_to_home" = "$vol_mount" ] || [ "${rel_to_home#"$vol_mount"/}" != "$rel_to_home" ]; then
+            local sub=${rel_to_home#"$vol_mount"}
+            sub=${sub#/}
+            local seed_path="$SEED_ROOT/$vol_name"
+            [ -n "$sub" ] && seed_path="$seed_path/$sub"
+            printf '%s\t%s' "$seed_path" "$vol_name"
+            return 0
+        fi
+    done <<<"$VOLUMES_LINES"
+}
+
 # Ensure the configured user exists. If the base image already has them
 # (e.g. node:22-bookworm has `node`), useradd is skipped. Otherwise create
 # them with an auto-assigned uid — letting useradd pick avoids collisions
@@ -291,14 +333,27 @@ for ep_kind in run run_gated login; do
     fi
 done
 
-# Profile files (manifest's `files:` section).
+# Profile files (manifest's `files:` section). If a file's `dst` falls
+# inside a declared volume's mount path, redirect to the seed location
+# under /usr/local/share/rp/seed/<volume>/<rel>; rp-init.sh seeds the
+# volume from there on first launch. Files outside any volume go
+# straight to their absolute in-container path as before.
 while IFS=$'\t' read -r src dst; do
     [ -z "$src" ] && continue
-    # Template {{user}} in the destination.
-    expanded_dst=${dst//\{\{user\}\}/$RP_USER}
-    parent_dir=$(dirname "$expanded_dst")
-    printf 'RUN mkdir -p %s && chown %s:%s %s\n' "$parent_dir" "$RP_USER" "$RP_USER" "$parent_dir"
-    printf 'COPY --chown=%s:%s agent/files/%s %s\n' "$RP_USER" "$RP_USER" "$src" "$expanded_dst"
+    expanded_dst=$(expand_user_template "$dst")
+    seed_pair=$(volume_seed_target "$expanded_dst")
+    if [ -n "$seed_pair" ]; then
+        seed_path=${seed_pair%%$'\t'*}
+        vol_name=${seed_pair##*$'\t'}
+        parent_dir=$(dirname "$seed_path")
+        printf '# files[].dst routed to seed for volume %s\n' "$vol_name"
+        printf 'RUN mkdir -p %s\n' "$parent_dir"
+        printf 'COPY agent/files/%s %s\n' "$src" "$seed_path"
+    else
+        parent_dir=$(dirname "$expanded_dst")
+        printf 'RUN mkdir -p %s && chown %s:%s %s\n' "$parent_dir" "$RP_USER" "$RP_USER" "$parent_dir"
+        printf 'COPY --chown=%s:%s agent/files/%s %s\n' "$RP_USER" "$RP_USER" "$src" "$expanded_dst"
+    fi
 done <<<"$FILES_LINES"
 
 cat <<EOF
@@ -318,9 +373,24 @@ USER root
 EOF
 
 if [ -n "$INSTRUCTIONS_DST" ]; then
-    expanded_inst=${INSTRUCTIONS_DST//\{\{user\}\}/$RP_USER}
-    expanded_dir=$(dirname "$expanded_inst")
-    cat <<EOF
+    expanded_inst=$(expand_user_template "$INSTRUCTIONS_DST")
+    seed_pair=$(volume_seed_target "$expanded_inst")
+    if [ -n "$seed_pair" ]; then
+        # instructions_dst is inside a volume → seed location; rp-init.sh
+        # will copy it into the mounted volume on first launch.
+        seed_path=${seed_pair%%$'\t'*}
+        vol_name=${seed_pair##*$'\t'}
+        seed_dir=$(dirname "$seed_path")
+        cat <<EOF
+# Compose agent instructions into the seed location for volume $vol_name
+# (instructions_dst falls inside the volume's mount path).
+RUN mkdir -p $seed_dir \\
+    && awk 'FNR==1 && NR>1 {print ""} {print}' /etc/rp/instructions/*.md \\
+        > $seed_path
+EOF
+    else
+        expanded_dir=$(dirname "$expanded_inst")
+        cat <<EOF
 # Compose agent instructions from /etc/rp/instructions/*.md (lexical order,
 # blank line between fragments) into the agent's expected path.
 RUN mkdir -p $expanded_dir \\
@@ -328,6 +398,7 @@ RUN mkdir -p $expanded_dir \\
         > $expanded_inst \\
     && chown -R $RP_USER:$RP_USER $expanded_dir
 EOF
+    fi
 fi
 
 cat <<EOF

@@ -333,6 +333,34 @@ if [ -n "${RP_USER:-}" ]; then
     fi
 fi
 
+# Persistent volumes (ADR-0014). RP_VOLUMES is comma-separated
+# `mount=name` pairs (e.g. `/home/coder/.claude=claude-home`). For each:
+#   1. chown the mount target to RP_USER (host bind shows up with macOS
+#      uids that don't map to anything sensible inside the container).
+#   2. If the mount is empty AND the image stashed a seed at
+#      /usr/local/share/rp/seed/<name>/, copy the seed into the mount.
+#      This is the bootstrap path so default profile-provided files
+#      (settings.json, CLAUDE.md, …) survive the first volume mount.
+if [ -n "${RP_VOLUMES:-}" ] && [ -n "${RP_USER:-}" ]; then
+    seed_root=/usr/local/share/rp/seed
+    IFS=',' read -ra _vols <<<"$RP_VOLUMES"
+    for v in "${_vols[@]}"; do
+        mount_path=${v%%=*}
+        vol_name=${v#*=}
+        [ -z "$mount_path" ] && continue
+        if [ ! -d "$mount_path" ]; then
+            echo "rp-init: WARN volume mount $mount_path missing; skipping" >&2
+            continue
+        fi
+        # Seed empty volumes from the image stash.
+        if [ -z "$(ls -A "$mount_path" 2>/dev/null)" ] && [ -d "$seed_root/$vol_name" ]; then
+            echo "rp-init: seeding volume $vol_name from $seed_root/$vol_name → $mount_path" >&2
+            cp -a "$seed_root/$vol_name/." "$mount_path/" 2>/dev/null || true
+        fi
+        chown -R "$RP_USER:$RP_USER" "$mount_path" 2>/dev/null || true
+    done
+fi
+
 CACHE_FLAG=""
 if [ -n "${RP_CACHE:-}" ]; then
     CACHE_FLAG="--cache $RP_CACHE"

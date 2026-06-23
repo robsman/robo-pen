@@ -236,6 +236,13 @@ purge:
     container image list 2>/dev/null \
         | awk 'NR>1 && $1 ~ /^rp-/ {print $1 ":" $2}' \
         | xargs -r -I {} container image rm -f {} >/dev/null 2>&1 || true
+    # Persistent volume host backing dirs (ADR-0014). Removes login
+    # tokens + any agent-local state that survived `rp destroy`.
+    vol_root=${RP_VOLUMES_DIR:-$HOME/.local/share/robo-pen/volumes}
+    if [ -d "$vol_root" ]; then
+        echo "rp purge: removing persistent volume backing at $vol_root" >&2
+        rm -rf "$vol_root"
+    fi
     echo "rp purge: done"
 
 # Cross-build the host-side rp-fuse binary (darwin/arm64), used by `rp lint`.
@@ -347,6 +354,23 @@ _ensure:
             p=${entry%:ro}
             bind_args+=(-v "$p:$p")
         done
+        # Persistent volumes declared by the agent profile (ADR-0014).
+        # mkdirs the host backing dir + emits one TSV line per volume.
+        # Forward the (mount\tname) pairs to init.sh via RP_VOLUMES so it
+        # can chown + seed each mount on container start.
+        volume_pairs=""
+        while IFS=$'\t' read -r host_dir cont_mount vol_name; do
+            [ -z "$host_dir" ] && continue
+            bind_args+=(-v "$host_dir:$cont_mount")
+            if [ -n "$volume_pairs" ]; then
+                volume_pairs="${volume_pairs},"
+            fi
+            volume_pairs="${volume_pairs}${cont_mount}=${vol_name}"
+        done < <( {{justfile_directory()}}/scripts/resolve-volumes.sh "$WS_PRIMARY" "$AGENT" "$CONT_NAME" "$USER_NAME" )
+        vol_env=()
+        if [ -n "$volume_pairs" ]; then
+            vol_env+=(-e "RP_VOLUMES=$volume_pairs")
+        fi
         # Extras from RP_EXTRA_ARGS_RAW (after `--` on the CLI), tab-separated.
         extra_args=()
         if [ -n "$EXTRA_TSV" ]; then
@@ -361,6 +385,7 @@ _ensure:
             $CONTAINER_ENV \
             $CREATE_FLAGS \
             -e "RP_WORKSPACE=$RP_WORKSPACE_ENV" \
+            "${vol_env[@]+${vol_env[@]}}" \
             "${bind_args[@]}" \
             ${extra_args[@]+"${extra_args[@]}"} \
             "$IMAGE_TAG" > /dev/null
@@ -405,6 +430,20 @@ create:
         p=${entry%:ro}
         bind_args+=(-v "$p:$p")
     done
+    # Persistent volumes (ADR-0014). Same mechanism as _ensure.
+    volume_pairs=""
+    while IFS=$'\t' read -r host_dir cont_mount vol_name; do
+        [ -z "$host_dir" ] && continue
+        bind_args+=(-v "$host_dir:$cont_mount")
+        if [ -n "$volume_pairs" ]; then
+            volume_pairs="${volume_pairs},"
+        fi
+        volume_pairs="${volume_pairs}${cont_mount}=${vol_name}"
+    done < <( {{justfile_directory()}}/scripts/resolve-volumes.sh "$WS_PRIMARY" "$AGENT" "$CONT_NAME" "$USER_NAME" )
+    vol_env=()
+    if [ -n "$volume_pairs" ]; then
+        vol_env+=(-e "RP_VOLUMES=$volume_pairs")
+    fi
     extra_args=()
     if [ -n "$EXTRA_TSV" ]; then
         IFS=$'\t' read -r -a extra_args <<<"${EXTRA_TSV%$'\t'}"
@@ -418,6 +457,7 @@ create:
         $CONTAINER_ENV \
         $CREATE_FLAGS \
         -e "RP_WORKSPACE=$RP_WORKSPACE_ENV" \
+        "${vol_env[@]+${vol_env[@]}}" \
         "${bind_args[@]}" \
         ${extra_args[@]+"${extra_args[@]}"} \
         "$IMAGE_TAG"
