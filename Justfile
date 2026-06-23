@@ -362,7 +362,7 @@ _ensure:
             $CREATE_FLAGS \
             -e "RP_WORKSPACE=$RP_WORKSPACE_ENV" \
             "${bind_args[@]}" \
-            "${extra_args[@]}" \
+            ${extra_args[@]+"${extra_args[@]}"} \
             "$IMAGE_TAG" > /dev/null
         echo "Auto-created container $CONT_NAME -> $WS_PRIMARY (image $IMAGE_TAG${CREATE_FLAGS:+, $CREATE_FLAGS})" >&2
     else
@@ -419,7 +419,7 @@ create:
         $CREATE_FLAGS \
         -e "RP_WORKSPACE=$RP_WORKSPACE_ENV" \
         "${bind_args[@]}" \
-        "${extra_args[@]}" \
+        ${extra_args[@]+"${extra_args[@]}"} \
         "$IMAGE_TAG"
     echo "Container $CONT_NAME created. Workspaces: $RP_WORKSPACE_ENV (image $IMAGE_TAG${CREATE_FLAGS:+, $CREATE_FLAGS})"
 
@@ -486,7 +486,7 @@ run: _ensure
         fi
     fi
     ws=$(container inspect "$CONT_NAME" 2>/dev/null | jq -r '.[0].configuration.labels["rp.host_path"] // empty')
-    container exec -it -u "$USER_NAME" --workdir "$ws" "$CONT_NAME" "$script" "${args[@]}"
+    container exec -it -u "$USER_NAME" --workdir "$ws" "$CONT_NAME" "$script" ${args[@]+"${args[@]}"}
 
 # Copy files from host to container
 cp-to name src dest:
