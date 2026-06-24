@@ -419,14 +419,24 @@ if [ -n "$PLUGIN_INSTALL" ]; then
         plugin_seed_path=${plugin_seed_pair%%$'\t'*}
         plugin_vol_name=${plugin_seed_pair##*$'\t'}
         # Emit one RUN step that registers each marketplace + installs
-        # each plugin into a staging HOME, then COPYs the resulting
-        # plugins tree into the volume's seed dir.
+        # each plugin. HOME points at the REAL container-user home so
+        # claude records install paths under /home/<user>/.claude/ —
+        # matching the runtime volume mount path. If we used a /tmp
+        # staging HOME, known_marketplaces.json would record a
+        # /tmp/... installLocation and claude would refuse to refresh
+        # the marketplace at runtime ("corrupted installLocation,
+        # expected a path inside /home/<user>/.claude/plugins/...").
+        #
+        # After install we copy /home/<user>/.claude → seed dir + wipe
+        # the image's copy so the runtime volume mount (which shadows
+        # /home/<user>/.claude at start) doesn't leave dead data
+        # accumulating in the image layer.
         cat <<EOF
 
 # --- Plugin install for volume $plugin_vol_name ---
 USER $RP_USER
 RUN set -e \\
-    && export HOME=/tmp/rp-plugin-stage \\
+    && export HOME=/home/$RP_USER \\
     && mkdir -p \$HOME/.claude \\
 EOF
         while IFS= read -r mref; do
@@ -441,8 +451,8 @@ EOF
     && true
 USER root
 RUN mkdir -p $plugin_seed_path \\
-    && cp -aR /tmp/rp-plugin-stage/.claude/. $plugin_seed_path/ \\
-    && rm -rf /tmp/rp-plugin-stage
+    && cp -aR /home/$RP_USER/.claude/. $plugin_seed_path/ \\
+    && rm -rf /home/$RP_USER/.claude
 EOF
     fi
 fi
