@@ -28,7 +28,11 @@ class RoboPen < Formula
     # auto-resolves ROBO_PEN_DIR to its own directory, so we point its
     # symlink target at <share>/rp and the wrapper finds the Justfile
     # next to it.
-    libexec.install Dir["*"]
+    #
+    # Dir["*"] does NOT match dotfiles, so the dot-entries the runtime
+    # depends on must be listed explicitly — `rp init` copies .rp.example/
+    # into the workspace, and the auth flow reads .env.example.
+    libexec.install Dir["*"], ".rp.example", ".env.example"
     bin.install_symlink libexec/"rp"
   end
 
