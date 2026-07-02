@@ -82,6 +82,28 @@ rp create . /Users/me/docs:ro                  # multi-workspace + read-only
 rp run --name my-name -- "summarize the README"
 ```
 
+### Git worktrees
+
+Bare-repo + worktree layouts (a shared `.bare/` with sibling worktree dirs) work
+out of the box. A linked worktree's `.git` file points by absolute path at a git
+dir *outside* the worktree — without that path mounted, git inside the container
+fails. `rp` detects the worktree and auto-binds the common git dir (e.g. `.bare/`)
+at its 1:1 path, so `commit`/`push`/`status` resolve normally:
+
+```bash
+cd ~/proj/main            # a worktree; ~/proj/.bare holds the objects/refs
+rp init                   # main/ needs its own .rp/ (it's the primary workspace)
+rp run                    # binds main/ (shadowed) + ~/proj/.bare (git store)
+```
+
+Notes:
+
+- The common git dir is a raw passthrough bind (not FUSE-shadowed), so `rp-init`
+  logs one benign `… has no .rp/, skipping` line for it at start. Expected.
+- Disable with `RP_NO_WORKTREE_BIND=1` if you prefer to manage binds yourself.
+- Running from the repo top level (the dir holding `.bare/` and every worktree)
+  also works — the single 1:1 bind covers everything, so no auto-bind happens.
+
 ---
 
 ## `.rp/shadow` — selective shadowing

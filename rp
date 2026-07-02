@@ -185,6 +185,34 @@ for entry in $paths; do
     fi
 done
 
+# Git worktree support: a *linked* worktree's .git file points by absolute
+# path at a git dir living OUTSIDE the workspace bind (e.g. a sibling .bare/).
+# With that path unmounted, every git command inside the container fails
+# ("not a git repository"). Auto-bind the common git dir at its 1:1 path so
+# the indirection resolves — it contains both the shared objects/refs and
+# this worktree's per-worktree gitdir, so one bind covers both. A linked
+# worktree is the only layout where --git-dir and --git-common-dir differ.
+# Opt out with RP_NO_WORKTREE_BIND=1.
+if [[ "${RP_NO_WORKTREE_BIND:-0}" != "1" ]]; then
+    primary_ws="${canon_paths[1]%:ro}"
+    git_dir=$(git -C "$primary_ws" rev-parse --path-format=absolute --git-dir 2>/dev/null) || git_dir=""
+    common_dir=$(git -C "$primary_ws" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || common_dir=""
+    if [[ -n "$common_dir" && "$git_dir" != "$common_dir" ]]; then
+        common_canon=$(cd "$common_dir" 2>/dev/null && pwd -P) || common_canon=""
+        if [[ -n "$common_canon" && "$common_canon" != "$primary_ws"/* ]]; then
+            already=0
+            for entry in $canon_paths; do
+                if [[ "${entry%:ro}" == "$common_canon" ]]; then already=1; break; fi
+            done
+            if (( ! already )); then
+                canon_paths+=("$common_canon")
+                echo "rp: git worktree detected — auto-binding common git dir: $common_canon" >&2
+                echo "    (set RP_NO_WORKTREE_BIND=1 to disable)" >&2
+            fi
+        fi
+    fi
+fi
+
 # Default name = basename of first PATH (with :ro suffix stripped).
 if [[ -z "$name" ]]; then
     first="${canon_paths[1]}"

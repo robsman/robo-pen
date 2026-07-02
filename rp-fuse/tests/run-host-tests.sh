@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# Runs every test-profile-*.sh in this directory against the host rp-fuse
-# binary. Skips if the host binary is missing (CI builds it via rp build-host
-# before invoking this runner).
+# Runs the host-side test-profile-*.sh (rp-fuse binary) and test-wrapper-*.sh
+# (the `rp` CLI) in this directory. Skips the rp-fuse binary tests if the host
+# binary is missing (CI builds it via rp build-host before invoking this
+# runner); wrapper tests need no binary.
 set -euo pipefail
 
 THIS=$(cd "$(dirname "$0")" && pwd)
 
 failed=0
-for t in "$THIS"/test-profile-*.sh; do
+for t in "$THIS"/test-profile-*.sh "$THIS"/test-wrapper-*.sh; do
     name=$(basename "$t" .sh)
     if bash "$t"; then
         :
