@@ -279,6 +279,15 @@ $USER_EXIST_CHECK
 # Hardening invariants per ADR-0005 / ADR-0008 invariant 3.
 RUN test "\$(id -u $RP_USER)" -ne 0 \\
     || (echo "rp-overlay: user '$RP_USER' is root, refusing" >&2; exit 1)
+
+# git: trust every bind-mounted workspace. rp-fuse presents the workspace
+# root owned by root (uid 0) while the agent runs as $RP_USER, so git's
+# dubious-ownership guard aborts every command ("detected dubious
+# ownership"). safe.directory=* is appropriate here: the container is a
+# single-user sandbox over the user's own bind mounts, and \`*\` also covers
+# the auto-bound worktree common dir whose path this build can't know. See
+# ADR-0020. Guarded so non-git bases still build.
+RUN command -v git >/dev/null 2>&1 && git config --system --add safe.directory '*' || true
 EOF
 
 # strip_sudo (ADR-0009): if the workspace opted in, run a best-effort strip
