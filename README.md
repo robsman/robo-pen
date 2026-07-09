@@ -173,7 +173,7 @@ To switch agents, set `agent: <name>` in `.rp/config.yaml` and `rp destroy && rp
 
 ## Per-project images
 
-The default workspace image is `robo-pen-default` (Node 22 + Python+uv + R + DuckDB + just + build-essential). If you want a different base — a Python-only image, a different Node version, your own pre-built tooling — drop a `.rp/config.yaml` in your workspace.
+The default workspace image is `robo-pen-default` — deliberately minimal and language-agnostic (git + curl + build-essential, no language runtime). If your project needs Node, Python, R, or anything else, drop a `.rp/config.yaml` in your workspace. `.rp.example/Dockerfile.full-toolchain` restores the Node 22 + Python/uv + R + DuckDB + just combo the default used to carry, if you want that whole set back.
 
 ### Pull a pre-built image
 ```yaml
@@ -270,7 +270,7 @@ Then `rp destroy && rp create` (memory is a create-time flag).
 
 - You run as the configured user (default `coder` uid 1000), **no sudo**. System packages must be added at image-build time (edit `Dockerfile` or your per-project `.rp/Dockerfile`, run `rp rebuild`).
 - The workspace (host path, 1:1 inside the container) is a FUSE mount served by `rp-fuse`. Passthrough paths reach the host bind; shadowed paths live in a container-local store.
-- Toolchain comes from the project image; the agent comes from the configured profile. With the default image + claude-code profile that's: `git`, `python3 + uv`, `node 22`, `R`, `DuckDB`, `just`, `build-essential`, `claude`.
+- Toolchain comes from the project image; the agent comes from the configured profile. With the default image + claude-code profile that's: `git`, `curl`, `build-essential`, `claude` — no language runtime unless your `.rp/config.yaml` adds one.
 - Auth: per-agent. claude-code uses `rp login` (Anthropic subscription) or `ANTHROPIC_API_KEY`. Other profiles declare their own env vars in `manifest.env`.
 
 ---
@@ -340,7 +340,7 @@ What this means concretely: if you list `.env.local` in `.rp/shadow`, the conten
 
 ```
 Dockerfile.base          rp-base: debian-slim + fuse3 + rp-fuse + rp-init.sh + coder
-Dockerfile               robo-pen-default (FROM rp-base) + Node/Python/R/DuckDB/just (no agent)
+Dockerfile               robo-pen-default (FROM rp-base) + git/curl/build-essential only (no language runtime, no agent)
 Justfile                 rp recipes (build-base / build / build-host / create / start / run / lint / ...)
 rp                       thin wrapper; dispatches lint locally, everything else via just
 rp-fuse/                 Go source: FUSE driver + lint + config parser + profile resolver + tests

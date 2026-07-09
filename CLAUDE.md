@@ -54,7 +54,7 @@ rp cp-from <name> <src> <dest>
 
 ```
 Dockerfile.base         — rp-base: minimal debian + fuse3 + rp-fuse + rp-init.sh + coder user
-Dockerfile              — robo-pen-default (FROM rp-base) + Node 22 + Python/uv + R + DuckDB + just; no agent
+Dockerfile              — robo-pen-default (FROM rp-base) + git/curl/build-essential only; no language runtime, no agent
 Justfile                — recipes; container prefix = "rp-" + agent + "-"; bind = invocation_directory()
 rp                      — wrapper that invokes just WITHOUT --working-directory, so just sees the caller's cwd
 rp-fuse/                — Go: FUSE driver, lint, config + profile parsers; tests/ for integration sh
@@ -68,7 +68,7 @@ agent.profiles/<name>/   — built-in agent profile bundles (claude-code is the 
   instructions.md       — agent-specific fragment for the composed CLAUDE.md / AGENTS.md
 config/
   00-container.md       — agent-agnostic container fundamentals (baked into rp-base)
-  10-toolchain-default.md — toolchain table for the default image (baked into robo-pen-default)
+  10-toolchain-default.md — toolchain table for the minimal default image (baked into robo-pen-default)
   rp-init.sh            — baked into the image at /usr/local/bin/rp-init.sh; PID 1; execs rp-fuse
 .env.example            — template for ANTHROPIC_API_KEY (also forwarded based on profile manifest's env: list)
 .rp.example/            — template for .rp/ (config.yaml + shadow)

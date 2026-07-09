@@ -2,8 +2,10 @@
 #
 # Copy this to your project's `.rp/config.yaml` to customize the container
 # image. Both `image:` and `build:` are optional; an empty/missing file means
-# "use the default robo-pen-default image" (Node 22 + Python+uv + R + DuckDB +
-# Claude CLI). See docs/adr/0006-per-project-images-with-rp-overlay.md for
+# "use the default robo-pen-default image" — deliberately minimal and
+# language-agnostic (git + curl + build-essential, no language runtime).
+# Need Node/Python/R/DuckDB/just back? See Dockerfile.full-toolchain next to
+# this file. See docs/adr/0006-per-project-images-with-rp-overlay.md for
 # the full design.
 #
 # Pick ONE of `image:` or `build:`. Setting both is a config error.
@@ -43,6 +45,12 @@
 #   dockerfile: Dockerfile        # relative to context
 #   args:
 #     NODE_VERSION: "22"
+#
+# Want the old Node/Python+uv/R/DuckDB/just default back? Point dockerfile
+# at the ready-made example instead:
+#
+# build:
+#   dockerfile: Dockerfile.full-toolchain
 
 # ── Option 3: shortcut ─────────────────────────────────────────────
 # If you only need to build a custom Dockerfile, drop it at .rp/Dockerfile

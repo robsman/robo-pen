@@ -210,14 +210,12 @@ This step typically takes 1-2 minutes the first time on a fast internet connecti
 rp build
 ```
 
-**What this does:** Apple Container reads the `Dockerfile` (the blueprint) and builds an image — a snapshot of a Linux system with all the tools pre-installed. This includes:
+**What this does:** Apple Container reads the `Dockerfile` (the blueprint) and builds an image — a snapshot of a Linux system with the basics pre-installed. The default image is deliberately minimal and language-agnostic:
 
-- Python 3 and uv (a fast Python package manager)
-- Node.js 22 (for JavaScript)
-- R (for statistical computing)
-- DuckDB (a fast analytical database)
-- git, just, and build tools
-- Claude Code CLI
+- git, curl, and build tools (build-essential)
+- Claude Code CLI (installed by the agent profile, not the base image)
+
+No language runtime (Python, Node, R, ...) is preinstalled — add what your project needs via `.rp/config.yaml`. If you want the old Node + Python/uv + R + DuckDB + just combo back, see `.rp.example/Dockerfile.full-toolchain`.
 
 The first build downloads a lot and takes several minutes. Future builds are much faster because each step is cached.
 
@@ -339,15 +337,15 @@ rp claude
 
 ### What Claude can do inside the container
 
-Claude has access to everything a regular Linux user would:
+Claude has access to everything a regular Linux user would, scoped to whatever your project's image provides:
 
 - **Read and write files** in `/workspace` (your shared project folder)
-- **Run Python, R, Node.js, or shell scripts**
-- **Install packages** (`uv pip install pandas`, `npm install express`, `R -e 'install.packages("ggplot2")'`)
+- **Run shell scripts**, plus whatever language runtimes your image includes (Python, R, Node.js, ...)
+- **Install packages** with whatever package manager the runtime provides (`uv pip install pandas`, `npm install express`, ...) — once that runtime is present
 - **Use git** to manage version control
-- **Query databases** with DuckDB
 - **Access the internet** to download data or packages
-- **Use `sudo`** (run as administrator) to install system-level software
+
+**No `sudo`.** The container user has no privilege-escalation path by design (that's the security boundary — see ADR-0005). System-level packages (a new apt package, a language runtime) have to be baked in at image-build time via `.rp/config.yaml`'s `image:`/`build:`, not installed ad hoc mid-session. If a project genuinely needs that ergonomic (e.g. adopting a devcontainer image's conventions), `allow_sudo: true` opts back in and accepts the weaker boundary — see ADR-0018.
 
 ---
 
@@ -590,7 +588,7 @@ rp claude "Create a set of 5 progressive Python \
 
 **Scenario:** You have large datasets that would benefit from SQL queries.
 
-DuckDB is pre-installed and can directly query CSV and Parquet files without importing them:
+DuckDB isn't preinstalled by default — add it via `.rp.example/Dockerfile.full-toolchain` (or your own `.rp/Dockerfile`). Once present, it can directly query CSV and Parquet files without importing them:
 
 ```bash
 cd ~/research/db-project
@@ -655,8 +653,9 @@ mkdir -p ~/sandbox/experiment
 cd ~/sandbox/experiment
 rp shell                       # auto-creates the container
 
-# Inside the container, install and try anything
-sudo apt-get install -y some-obscure-tool
+# Inside the container, install and try anything that doesn't need
+# a system package (no sudo by default — see the ADR-0005 security
+# boundary note above)
 uv pip install some-experimental-library
 
 # If it all goes wrong
@@ -664,6 +663,8 @@ exit
 rp destroy                     # Gone. No trace.
 rp claude                      # Fresh start — auto-creates a new container.
 ```
+
+Need an actual system package (`apt-get install`) for the experiment? Add it to a `.rp/Dockerfile` and `rp destroy && rp run` to rebuild — or set `allow_sudo: true` in `.rp/config.yaml` for the devcontainer-style "just sudo it" ergonomic (weakens the shadow boundary; see ADR-0018).
 
 ---
 
@@ -851,7 +852,7 @@ Existing containers are **not** affected — only new containers created after t
 | **Image** | A snapshot/template used to create containers (like a class vs an instance) |
 | **Justfile** | A file containing shortcut recipes for terminal commands |
 | **Repository (repo)** | A project folder tracked by git, often hosted on GitHub |
-| **`sudo`** | "Superuser do" — runs a command as the administrator. Inside the container, this works without a password |
+| **`sudo`** | "Superuser do" — runs a command as the administrator. Not available inside the container by default (the security boundary requires no privilege-escalation path); `allow_sudo: true` opts back in at the cost of that boundary |
 | **Virtual machine (VM)** | A complete simulated computer running inside your real computer |
 | **YOLO mode** | Running Claude without permission prompts (safe inside containers) |
 | **`~`** | Shorthand for your home folder in the terminal (e.g., `/Users/yourname` on a Mac) |
