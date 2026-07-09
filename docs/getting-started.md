@@ -189,7 +189,7 @@ Then press `Ctrl+O` (the letter O) to save, press Enter to confirm, and `Ctrl+X`
 
 This file is private — it's listed in `.gitignore` (a special file that tells git "never upload these files"), so it will never be accidentally shared even if you publish your project.
 
-### Step 3: Install Apple Container
+### Step 3: Install Apple Container and the container image
 
 ```bash
 rp setup
@@ -199,25 +199,20 @@ rp setup
 1. Installs Apple Container via Homebrew (the `container` formula) — a single command-line tool, no daemon to manage
 2. Installs `jq` (used by the Justfile to parse container state)
 3. Starts the Apple Container service in the background, ready to launch per-container Linux VMs on demand
+4. Pulls the pre-built container images (~one-time download) — no separate build step needed
 
-This step typically takes 1-2 minutes the first time on a fast internet connection. You'll see Homebrew output scrolling by. When your terminal prompt returns, Apple Container is ready.
-
-**If you see a message that the service is already running**, that's fine — it means you've done this before.
-
-### Step 4: Build the container image
-
-```bash
-rp build
-```
-
-**What this does:** Apple Container reads the `Dockerfile` (the blueprint) and builds an image — a snapshot of a Linux system with the basics pre-installed. The default image is deliberately minimal and language-agnostic:
+The container image is a snapshot of a Linux system with the basics pre-installed. It's deliberately minimal and language-agnostic:
 
 - git, curl, and build tools (build-essential)
 - Claude Code CLI (installed by the agent profile, not the base image)
 
 No language runtime (Python, Node, R, ...) is preinstalled — add what your project needs via `.rp/config.yaml`. If you want the old Node + Python/uv + R + DuckDB + just combo back, see `.rp.example/Dockerfile.full-toolchain`.
 
-The first build downloads a lot and takes several minutes. Future builds are much faster because each step is cached.
+This step typically takes 1-2 minutes the first time on a fast internet connection. When your terminal prompt returns, Apple Container is ready.
+
+**If you see a message that the service is already running**, that's fine — it means you've done this before.
+
+**Building from source instead:** if you cloned the repo rather than installing via Homebrew, or want to change `Dockerfile`/`Dockerfile.base` yourself, run `RP_BUILD_FROM_SOURCE=1 rp setup` instead — this builds both images locally (~15 min) rather than pulling them.
 
 ---
 
