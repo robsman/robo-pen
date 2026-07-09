@@ -1,6 +1,6 @@
 # Container Environment
 
-You are running inside an isolated container (Debian bookworm). You run as user `coder` (uid 1000) with no privilege escalation — there is no `sudo`. System-level changes must be made at image-build time on the host, not from inside the running container.
+You are running inside an isolated container (Debian trixie). You run as user `coder` (uid 1000) with no privilege escalation — there is no `sudo`. System-level changes must be made at image-build time on the host, not from inside the running container.
 
 ## Directory Layout
 

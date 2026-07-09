@@ -22,7 +22,7 @@ ws=$(mk_probe path-devc)
 cd "$ws"
 "$RP" init >/dev/null
 cat > .rp/config.yaml <<EOF
-image: mcr.microsoft.com/devcontainers/javascript-node:22
+image: mcr.microsoft.com/devcontainers/javascript-node:24
 user: coder
 EOF
 cont=$(rp_create_and_start path-devc)

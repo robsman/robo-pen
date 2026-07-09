@@ -48,14 +48,14 @@ echo "# defaults; agent + image + user all unset"' "pass"
 # Case 2: devcontainer + user: coder — should pass (image lacks coder; rp creates).
 run_case "devcontainer+coder" "matrix-devc-coder" '
 cat <<EOF
-image: mcr.microsoft.com/devcontainers/javascript-node:22
+image: mcr.microsoft.com/devcontainers/javascript-node:24
 user: coder
 EOF' "pass"
 
 # Case 3: devcontainer + user: node — should fail (node IS in sudoers).
 run_case "devcontainer+node" "matrix-devc-node" '
 cat <<EOF
-image: mcr.microsoft.com/devcontainers/javascript-node:22
+image: mcr.microsoft.com/devcontainers/javascript-node:24
 user: node
 EOF' "fail"
 
@@ -63,7 +63,7 @@ EOF' "fail"
 # ADR-0009 opt-in: overlay strips node's sudo grant during build.
 run_case "devcontainer+node+strip_sudo" "matrix-strip-sudo" '
 cat <<EOF
-image: mcr.microsoft.com/devcontainers/javascript-node:22
+image: mcr.microsoft.com/devcontainers/javascript-node:24
 user: node
 strip_sudo: true
 EOF' "pass"

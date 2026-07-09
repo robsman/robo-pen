@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-A macOS tool for running coding agents (Claude Code, OpenCode, ...) inside isolated Apple Container containers (Debian bookworm). Requires Apple Silicon and macOS 26+. Containers get full `--dangerously-skip-permissions` access without touching the host. The host directory you invoke `rp` from is bind-mounted 1:1 inside the container — same path inside and outside.
+A macOS tool for running coding agents (Claude Code, OpenCode, ...) inside isolated Apple Container containers (Debian trixie). Requires Apple Silicon and macOS 26+. Containers get full `--dangerously-skip-permissions` access without touching the host. The host directory you invoke `rp` from is bind-mounted 1:1 inside the container — same path inside and outside.
 
 The project is named **robo-pen**. The wrapper command is **`rp`**.
 

@@ -35,7 +35,7 @@
 #   scripts/build-docker-experimental.sh                    # sandbox-templates:shell + agent
 #   scripts/build-docker-experimental.sh --strip-sudo       # same, with sudo stripped
 #   scripts/build-docker-experimental.sh --user node --strip-sudo \
-#       mcr.microsoft.com/devcontainers/javascript-node:22
+#       mcr.microsoft.com/devcontainers/javascript-node:24
 #
 # Requires: Docker Desktop with buildx (default on recent installs).
 #

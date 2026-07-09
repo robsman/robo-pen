@@ -178,7 +178,7 @@ The default workspace image is `robo-pen-default` (Node 22 + Python+uv + R + Duc
 ### Pull a pre-built image
 ```yaml
 # .rp/config.yaml
-image: python:3.12-slim-bookworm
+image: python:3.12-slim-trixie
 ```
 On first `rp run` rp composes the overlay onto the image (fuse3, rp-fuse, mount points, user, agent profile install) and tags the result `<container-name>:latest-rp`. Subsequent starts reuse the composed image.
 
@@ -197,8 +197,8 @@ build:
 Default is `coder` (uid auto-assigned by useradd). Override via `user:` to either adopt an existing user from the base image or create a different name:
 
 ```yaml
-# Adopt the existing `node` user shipped by node:22-bookworm.
-image: node:22-bookworm
+# Adopt the existing `node` user shipped by node:22-trixie.
+image: node:22-trixie
 user: node
 ```
 
@@ -206,7 +206,7 @@ user: node
 # Devcontainer images often ship a privileged `node` user (with sudo).
 # Setting user: coder makes the overlay create a fresh non-privileged
 # coder user — the rp security boundary needs uid != 0 + no sudoers.
-image: mcr.microsoft.com/devcontainers/javascript-node:22
+image: mcr.microsoft.com/devcontainers/javascript-node:24
 user: coder
 ```
 
@@ -222,7 +222,7 @@ rp run                        # first run builds the project image
 `rp init --force` overwrites an existing `.rp/`.
 
 ### Constraints
-- **Debian/Ubuntu bases only** (v1). The rp overlay installs `fuse3` via `apt-get`, so Alpine, RHEL, Arch, distroless, etc. bases are rejected up front with a clear error pointing at ADR-0006. Good bases: `debian:bookworm-slim`, `ubuntu:24.04`, `node:*-bookworm`, `python:*-slim-bookworm`. If you need Alpine-flavored tooling today, write a Debian-based `.rp/Dockerfile` that installs the equivalent packages via apt.
+- **Debian/Ubuntu bases only** (v1). The rp overlay installs `fuse3` via `apt-get`, so Alpine, RHEL, Arch, distroless, etc. bases are rejected up front with a clear error pointing at ADR-0006. Good bases: `debian:trixie-slim`, `ubuntu:24.04`, `node:*-trixie`, `python:*-slim-trixie`. If you need Alpine-flavored tooling today, write a Debian-based `.rp/Dockerfile` that installs the equivalent packages via apt.
 - `.rp/config.yaml` recognised keys: `agent`, `image`, `build` (with `context`, `dockerfile`, `args`), `user`, `resources.memory`, `resources.cpus`, `fuse.cache`. Anything else parse-errors with line numbers.
 
 ### Edit-config workflow

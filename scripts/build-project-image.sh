@@ -145,7 +145,7 @@ $probe_err
 
 Apple Container runs natively on arm64 (Apple Silicon) and does not emulate
 amd64-only images. Pick a base that publishes an arm64 manifest list — most
-official images do (debian, ubuntu, node:*-bookworm, python:*-slim-bookworm,
+official images do (debian, ubuntu, node:*-trixie, python:*-slim-trixie,
 mcr.microsoft.com/devcontainers/javascript-node, etc.). The mcr.microsoft.com
 /devcontainers/universal image is amd64-only at the time of writing.
 MSG
@@ -157,7 +157,7 @@ $probe_err
 
 rp's v1 overlay installs fuse3 via apt-get. Alpine, RHEL, Arch, distroless,
 etc. bases are not supported yet. Use a Debian-based image
-(debian:bookworm-slim, ubuntu:24.04, node:*-bookworm, python:*-slim-bookworm).
+(debian:trixie-slim, ubuntu:24.04, node:*-trixie, python:*-slim-trixie).
 
 See docs/adr/0006-per-project-images-with-rp-overlay.md for the restriction
 and the path to widening it.
@@ -246,7 +246,7 @@ volume_seed_target() {
 }
 
 # Ensure the configured user exists. If the base image already has them
-# (e.g. node:22-bookworm has `node`), useradd is skipped. Otherwise create
+# (e.g. node:22-trixie has `node`), useradd is skipped. Otherwise create
 # them with an auto-assigned uid — letting useradd pick avoids collisions
 # with existing uid 1000 in devcontainer-style images. The security
 # invariants (uid != 0, no sudoers entry) are enforced below regardless of

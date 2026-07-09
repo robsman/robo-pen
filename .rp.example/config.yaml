@@ -30,7 +30,7 @@
 # agent: opencode
 
 # ── Option 1: pull a pre-built image ───────────────────────────────
-# image: python:3.12-slim-bookworm
+# image: python:3.12-slim-trixie
 # image: ghcr.io/your-org/devtools:v1.4
 
 # ── Option 2: build locally from a Dockerfile ─────────────────────
@@ -67,7 +67,7 @@
 # grant path still fails the build — strip_sudo is best-effort, not a
 # trust-me override. See docs/adr/0009-opt-in-sudo-stripping.md.
 #
-# image: mcr.microsoft.com/devcontainers/javascript-node:22
+# image: mcr.microsoft.com/devcontainers/javascript-node:24
 # user: node
 # strip_sudo: true
 
@@ -82,7 +82,7 @@
 # Skips both the build-time refusal and the runtime rp-init.sh check
 # (equivalent to setting RP_ALLOW_SUDO=1). See ADR-0018.
 #
-# image: mcr.microsoft.com/devcontainers/javascript-node:22
+# image: mcr.microsoft.com/devcontainers/javascript-node:24
 # user: node
 # allow_sudo: true
 
@@ -229,8 +229,8 @@
 # ── Constraints (v1) ───────────────────────────────────────────────
 # - Base image must be Debian/Ubuntu-derived. rp probes for /etc/debian_version
 #   before building the overlay; Alpine, RHEL, Arch, distroless bases are
-#   rejected with a clear error. Good picks: debian:bookworm-slim, ubuntu:24.04,
-#   node:*-bookworm, python:*-slim-bookworm.
+#   rejected with a clear error. Good picks: debian:trixie-slim, ubuntu:24.04,
+#   node:*-trixie, python:*-slim-trixie.
 # - Only the keys above are honored. Anything else (services, depends_on,
 #   ports, environment, volumes, ...) raises a parse error with a line
 #   number. Run `rp lint` inside your workspace to validate this file.
