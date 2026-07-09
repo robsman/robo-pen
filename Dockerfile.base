@@ -4,22 +4,22 @@
 # per-project images apply the same rp layer as a final stage atop a user's
 # image of choice (see ADR-0006).
 
-# ── Stage 1: build rp-fuse (Go) ─────────────────────────────────
-FROM golang:1.22-alpine AS rp-fuse-build
+# ── Stage 1: build rp-fuse + rp-init-bootstrap (Go) ─────────────
+# Two separate Go modules, one shared golang:1.22-alpine build stage.
+# rp-init-bootstrap is the tight setuid-root wrapper that lets a non-root
+# caller exec /usr/local/bin/rp-init.sh as root — required by Docker
+# Sandbox-style runtimes where the container's default user is non-root
+# and there's no equivalent of Apple Container's `--user 0` create flag.
+# See ADR-0010.
+FROM golang:1.22-alpine AS rp-go-build
 
-WORKDIR /src
+WORKDIR /src/rp-fuse
 COPY rp-fuse/go.mod rp-fuse/go.sum ./
 RUN go mod download
 COPY rp-fuse/main.go rp-fuse/host_node.go rp-fuse/rules.go rp-fuse/lint.go rp-fuse/config.go rp-fuse/config_cmd.go rp-fuse/profile.go rp-fuse/profile_cmd.go ./
 RUN CGO_ENABLED=0 go build -o /out/rp-fuse -ldflags "-s -w" .
 
-# ── Stage 1b: build rp-init-bootstrap (Go setuid wrapper) ──────
-# Tight setuid-root wrapper that lets a non-root caller exec
-# /usr/local/bin/rp-init.sh as root. Required by Docker Sandbox-style
-# runtimes where the container's default user is non-root and there's
-# no equivalent of Apple Container's `--user 0` create flag. See ADR-0010.
-FROM golang:1.22-alpine AS rp-init-bootstrap-build
-WORKDIR /src
+WORKDIR /src/rp-init-bootstrap
 COPY rp-init-bootstrap/go.mod ./
 COPY rp-init-bootstrap/main.go ./
 RUN CGO_ENABLED=0 go build -o /out/rp-init-bootstrap -ldflags "-s -w" .
@@ -48,8 +48,8 @@ RUN useradd -m -s /bin/bash -u 1000 coder
 RUN sed -i 's/^#user_allow_other/user_allow_other/' /etc/fuse.conf 2>/dev/null \
     || echo 'user_allow_other' >> /etc/fuse.conf
 
-COPY --from=rp-fuse-build /out/rp-fuse /usr/local/bin/rp-fuse
-COPY --from=rp-init-bootstrap-build /out/rp-init-bootstrap /usr/local/bin/rp-init-bootstrap
+COPY --from=rp-go-build /out/rp-fuse /usr/local/bin/rp-fuse
+COPY --from=rp-go-build /out/rp-init-bootstrap /usr/local/bin/rp-init-bootstrap
 COPY config/rp-init.sh /usr/local/bin/rp-init.sh
 
 # Agent-agnostic container fundamentals fragment. The overlay copies this
