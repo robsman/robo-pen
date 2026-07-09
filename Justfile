@@ -164,15 +164,23 @@ pull-images:
 # Build rp-base locally (minimal image with rp-fuse + init script); see ADR-0006.
 # Most users want `just pull-images` (much faster). Use this when developing
 # on Dockerfile.base or rp-fuse itself.
+#
+# Also re-tags rp-base:{{image_tag}} (bare -t only produces rp-base:latest).
+# create/_ensure COPY --from=rp-base:{{image_tag}} (pinned per commit
+# 7045387) — on a brew install image_tag is a real version (e.g. v1.0.10),
+# not latest, so without this tag the overlay build can't find the base
+# locally and Apple Container mistakes the missing ref for a remote pull.
 build-base: builder-ensure
     container build \
         -f {{justfile_directory()}}/Dockerfile.base \
         -t rp-base \
         {{justfile_directory()}}
+    container image tag rp-base rp-base:{{image_tag}}
 
 # Build robo-pen-default locally on top of a local rp-base.
 build: build-base
     container build -t {{image}} {{justfile_directory()}}
+    container image tag {{image}} {{image}}:{{image_tag}}
 
 # Force-rebuild both images from scratch, no cache. Pre-built images on
 # ghcr.io are NOT touched — this is the "I want a fresh local build" recipe.
@@ -181,7 +189,9 @@ rebuild: builder-ensure
         -f {{justfile_directory()}}/Dockerfile.base \
         -t rp-base \
         {{justfile_directory()}}
+    container image tag rp-base rp-base:{{image_tag}}
     container build --no-cache -t {{image}} {{justfile_directory()}}
+    container image tag {{image}} {{image}}:{{image_tag}}
 
 # Remove rp-base + robo-pen-default image tags older than the current
 # pin. The current pin = whatever `{{image_tag}}` resolves to (the
