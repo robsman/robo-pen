@@ -15,7 +15,7 @@ import (
 func runProfile(args []string) {
 	fs := flag.NewFlagSet("profile", flag.ExitOnError)
 	workspace := fs.String("workspace", "", "absolute path of the workspace directory")
-	repoDir := fs.String("repo-dir", "", "absolute path of the robo-pen-default repo (where agent.profiles/ lives)")
+	repoDir := fs.String("repo-dir", "", "absolute path of the robo-pen repo (where agent.profiles/ lives)")
 	agent := fs.String("agent", "", "agent profile name (overrides .rp/config.yaml if set)")
 	configPath := fs.String("config", "", "path to .rp/config.yaml (used to determine agent when --agent is unset)")
 	fs.Usage = func() {

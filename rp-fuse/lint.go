@@ -33,7 +33,7 @@ func runLint(args []string) {
 	fs := flag.NewFlagSet("lint", flag.ExitOnError)
 	matchPath := fs.String("match", "", "report whether this workspace-relative path would be shadowed")
 	workspace := fs.String("workspace", ".", "workspace directory (default: current dir)")
-	repoDir := fs.String("repo-dir", "", "robo-pen-default repo dir (skips profile lint if empty)")
+	repoDir := fs.String("repo-dir", "", "robo-pen repo dir (skips profile lint if empty)")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "Usage: rp-fuse lint [--match <path>] [--workspace <ws>] [--repo-dir <repo>] [<.rp/shadow file>]")
 		fmt.Fprintln(os.Stderr, "  Default: lints .rp/shadow, validates .rp/config.yaml, and resolves the agent profile.")
@@ -157,7 +157,7 @@ func lintConfig(path string, exitCode *int) *ProjectConfig {
 		return nil
 	}
 
-	source := "default (robo-pen-default)"
+	source := "default (rp-default)"
 	switch {
 	case cfg.Image != "":
 		source = "image: " + cfg.Image

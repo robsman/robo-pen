@@ -116,8 +116,8 @@ There are two ways to use Claude Code:
 Open Terminal and run:
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/robo-pen-default.git
-cd robo-pen-default
+git clone https://github.com/YOUR_USERNAME/robo-pen.git
+cd robo-pen
 ```
 
 Replace `YOUR_USERNAME` with the actual GitHub username or organization where this repository (repo) is hosted.
@@ -138,10 +138,10 @@ cp rp ~/bin/rp       # or /usr/local/bin/rp
 chmod +x ~/bin/rp
 ```
 
-If you cloned this repo somewhere other than `~/repos/robo-pen-default`, tell `rp` where to find it by adding this line to your `~/.zshrc`:
+If you cloned this repo somewhere other than `~/repos/robo-pen`, tell `rp` where to find it by adding this line to your `~/.zshrc`:
 
 ```bash
-export ROBO_PEN_DIR="$HOME/path/to/robo-pen-default"
+export ROBO_PEN_DIR="$HOME/path/to/robo-pen"
 ```
 
 Then, from any folder on your system:
@@ -153,7 +153,7 @@ rp list                # Show all claude containers
 rp --recipes           # Show all available recipes
 ```
 
-Under the hood, `rp` just calls `just` with your current directory preserved, so `rp claude` is equivalent to `just claude` run from the same folder. Examples in the rest of this guide use `rp`; you can substitute `just` (from inside the `robo-pen-default` directory) if you prefer.
+Under the hood, `rp` just calls `just` with your current directory preserved, so `rp claude` is equivalent to `just claude` run from the same folder. Examples in the rest of this guide use `rp`; you can substitute `just` (from inside the `robo-pen` directory) if you prefer.
 
 ### Step 2: Set up authentication
 
@@ -695,7 +695,7 @@ Run `rp <recipe>` from any folder. By default, recipes that take a `<name>` argu
 | `rp service-stop` | Stops the Apple Container service (frees all resources) |
 | `rp service-status` | Shows whether the Apple Container service is running |
 
-> `rp` is just a thin wrapper around `just` that preserves your current directory. If you prefer, you can `cd` into the `robo-pen-default` repo and run the recipes as `just <recipe>` — the cwd-anchored behavior still applies because the recipes read your *invocation* directory.
+> `rp` is just a thin wrapper around `just` that preserves your current directory. If you prefer, you can `cd` into the `robo-pen` repo and run the recipes as `just <recipe>` — the cwd-anchored behavior still applies because the recipes read your *invocation* directory.
 
 ---
 
@@ -706,18 +706,18 @@ Run `rp <recipe>` from any folder. By default, recipes that take a `<name>` argu
 Either `rp` isn't on your PATH or it isn't executable. Re-check the install step:
 
 ```bash
-cp /path/to/robo-pen-default/rp ~/bin/rp
+cp /path/to/robo-pen/rp ~/bin/rp
 chmod +x ~/bin/rp
 ```
 
-If you cloned the repo somewhere other than `~/repos/robo-pen-default`, also set `ROBO_PEN_DIR` in your `~/.zshrc` (see the install tip above).
+If you cloned the repo somewhere other than `~/repos/robo-pen`, also set `ROBO_PEN_DIR` in your `~/.zshrc` (see the install tip above).
 
 ### `just` commands don't work / "No justfile found"
 
-If you're invoking `just` directly (not through `rp`), make sure you are in the `robo-pen-default` directory:
+If you're invoking `just` directly (not through `rp`), make sure you are in the `robo-pen` directory:
 
 ```bash
-cd /path/to/robo-pen-default
+cd /path/to/robo-pen
 ```
 
 `rp` handles this for you automatically — it's the recommended invocation.
@@ -771,10 +771,10 @@ Then `cd` into the folder you want and run `rp claude` again to recreate.
 
 **Subscription users:** Run `rp login` from the project folder to authenticate. You need to do this once per container (and again after `rp destroy` + recreate).
 
-**API key users:** Make sure you have a `.env` file (not `.env.example`) in the `robo-pen-default` repo with your actual API key:
+**API key users:** Make sure you have a `.env` file (not `.env.example`) in the `robo-pen` repo with your actual API key:
 
 ```bash
-cat /path/to/robo-pen-default/.env
+cat /path/to/robo-pen/.env
 # Should show: ANTHROPIC_API_KEY=sk-ant-...
 ```
 
