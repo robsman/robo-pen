@@ -521,6 +521,35 @@ resources:
 	}
 }
 
+// Regression test: a plain bool zero-value is indistinguishable from an
+// explicit false, so a naive `if other.StripSudo { c.StripSudo = true }`
+// merge can only ever flip false->true, never override true back to
+// false. config.local.yaml must be able to switch a workspace from
+// strip_sudo back off (e.g. toward allow_sudo instead) — verify it can.
+func TestParseProjectConfig_LocalMerge_BoolScalarOverridesToFalse(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(`user: node
+strip_sudo: true
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.local.yaml"), []byte(`strip_sudo: false
+allow_sudo: true
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := ParseProjectConfig(filepath.Join(dir, "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.StripSudo == nil || *cfg.StripSudo {
+		t.Errorf("strip_sudo = %v, want false (local override)", cfg.StripSudo)
+	}
+	if cfg.AllowSudo == nil || !*cfg.AllowSudo {
+		t.Errorf("allow_sudo = %v, want true (local override)", cfg.AllowSudo)
+	}
+}
+
 func TestParseProjectConfig_LocalMerge_NoLocalNoChange(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("image: foo\n"), 0o644); err != nil {
@@ -540,8 +569,8 @@ func TestParseProjectConfig_AllowSudoParse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.AllowSudo {
-		t.Errorf("AllowSudo = false, want true")
+	if cfg.AllowSudo == nil || !*cfg.AllowSudo {
+		t.Errorf("AllowSudo = %v, want true", cfg.AllowSudo)
 	}
 }
 

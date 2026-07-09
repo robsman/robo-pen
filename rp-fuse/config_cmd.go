@@ -110,12 +110,12 @@ func projectConfigField(c *ProjectConfig, name string) (string, error) {
 	case "user":
 		return c.User, nil
 	case "strip_sudo":
-		if c.StripSudo {
+		if c.StripSudo != nil && *c.StripSudo {
 			return "true", nil
 		}
 		return "", nil
 	case "allow_sudo":
-		if c.AllowSudo {
+		if c.AllowSudo != nil && *c.AllowSudo {
 			return "true", nil
 		}
 		return "", nil

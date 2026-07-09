@@ -275,8 +275,8 @@ func TestProjectConfig_StripSudoDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.StripSudo {
-		t.Errorf("strip_sudo should default to false")
+	if cfg.StripSudo != nil {
+		t.Errorf("strip_sudo should default to unset (nil), got %v", *cfg.StripSudo)
 	}
 }
 
@@ -285,7 +285,7 @@ func TestProjectConfig_StripSudoTrue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.StripSudo {
+	if cfg.StripSudo == nil || !*cfg.StripSudo {
 		t.Errorf("strip_sudo: true should parse to true")
 	}
 }

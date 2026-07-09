@@ -31,7 +31,12 @@ type ProjectConfig struct {
 	// ADR-0009). Default is false: rp refuses to use a user with sudo. Set
 	// this true to keep an image's conventional user (e.g. `node` on the
 	// devcontainer javascript-node:22 image) while removing its sudo grant.
-	StripSudo bool          `yaml:"strip_sudo,omitempty"`
+	//
+	// Pointer, not bool: config.local.yaml needs to be able to override this
+	// back to false explicitly (e.g. switching a workspace from strip_sudo to
+	// allow_sudo). A plain bool's zero value is indistinguishable from an
+	// explicit false, so Merge could only ever flip false->true, never back.
+	StripSudo *bool `yaml:"strip_sudo,omitempty"`
 	// AllowSudo (default false) bypasses the shadow-boundary invariant
 	// that the container user must NOT be in sudoers. When true, both
 	// the overlay build and rp-init.sh skip the "no sudo" refusal.
@@ -41,7 +46,9 @@ type ProjectConfig struct {
 	// style ergonomic user and trust the outer boundary (single-tenant
 	// Mac, no untrusted code); prefer strip_sudo: true or a
 	// sudo-free user for stricter setups. See ADR-0018.
-	AllowSudo bool `yaml:"allow_sudo,omitempty"`
+	//
+	// Pointer for the same reason as StripSudo above.
+	AllowSudo *bool `yaml:"allow_sudo,omitempty"`
 	Resources *ResourceSpec `yaml:"resources,omitempty"`
 	Fuse      *FuseSpec     `yaml:"fuse,omitempty"`
 	// Plugins extends the agent profile's plugin set (manifest's
@@ -224,11 +231,11 @@ func (c *ProjectConfig) Merge(other *ProjectConfig) {
 	if other.User != "" {
 		c.User = other.User
 	}
-	if other.StripSudo {
-		c.StripSudo = true
+	if other.StripSudo != nil {
+		c.StripSudo = other.StripSudo
 	}
-	if other.AllowSudo {
-		c.AllowSudo = true
+	if other.AllowSudo != nil {
+		c.AllowSudo = other.AllowSudo
 	}
 	if other.Build != nil {
 		c.Build = other.Build
