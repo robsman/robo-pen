@@ -177,7 +177,10 @@ build-base: builder-ensure
         {{justfile_directory()}}
     container image tag rp-base rp-base:{{image_tag}}
 
-# Build robo-pen-default locally on top of a local rp-base.
+# Build robo-pen-default locally. Standalone (not FROM rp-base — see
+# Dockerfile), but still depends on build-base: `rp create`'s overlay
+# needs a local rp-base:{{image_tag}} to COPY its runtime bits from,
+# regardless of which project image (default or custom) it's overlaying.
 build: build-base
     container build -t {{image}} {{justfile_directory()}}
     container image tag {{image}} {{image}}:{{image_tag}}

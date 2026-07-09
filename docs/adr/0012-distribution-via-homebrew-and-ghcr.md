@@ -11,7 +11,7 @@ Before this change, first-time setup required `git clone` + three `brew install`
 1. **GitHub Actions release workflow** (`.github/workflows/release.yml`). Tagged-push trigger (`v*`) runs four jobs:
    - `host-binary` — cross-builds `rp-fuse-darwin-arm64` on `ubuntu-latest` (CGO disabled, so Linux can compile a Darwin binary).
    - `image-base` — `ubuntu-24.04-arm` native runner; builds `Dockerfile.base` for `linux/arm64`; pushes to `ghcr.io/<owner>/rp-base:vX.Y.Z` + `:latest`.
-   - `image-default` — depends on `image-base`; rewrites the local `FROM rp-base` to `FROM ghcr.io/<owner>/rp-base:<tag>` and pushes `robo-pen-default`.
+   - `image-default` — builds `Dockerfile` and pushes `robo-pen-default`. Originally depended on `image-base` and rewrote a `FROM rp-base` line to point at the just-pushed registry image; `robo-pen-default` was decoupled from `rp-base` entirely (standalone `FROM debian:trixie-slim` — the rp overlay injects rp-base's runtime bits at `rp create` time regardless of source, so the inheritance was redundant), so this job is now independent and the two build in parallel. See ADR-0006's build-pipeline section.
    - `release` — bundles source + host binary into `robo-pen-vX.Y.Z.tar.gz`, attaches checksum, calls `gh release create`.
 
 2. **`rp setup` prefers pull over build.** New recipe `pull-images` pulls + re-tags ghcr images as the local tags (`rp-base`, `robo-pen-default`) the rest of the tooling expects. `RP_BUILD_FROM_SOURCE=1` flips back to the local-build path for Dockerfile development. `RP_REGISTRY_OWNER` + `RP_IMAGE_TAG` let users pin a fork or a specific release.

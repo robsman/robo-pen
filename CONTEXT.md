@@ -37,7 +37,7 @@ _Avoid_: ignore patterns, ccrignore rules.
 ### Image layers
 
 **Base image**:
-The shared `rp-base` image, built once per robo-pen release via `rp build-base`. Holds the rp-fuse binary, the rp-init.sh script, the agent-agnostic `00-container.md` fragment, and the bits required by the rp overlay (fuse package, fuse.conf, mount-point directories). Project images derive from it.
+The shared `rp-base` image, built once per robo-pen release via `rp build-base`. Holds the rp-fuse binary, the rp-init.sh script, the agent-agnostic `00-container.md` fragment, and the bits required by the rp overlay (fuse package, fuse.conf, mount-point directories). Not a parent image any project image inherits from — the overlay `COPY --from=rp-base` injects these bits into every project image at build time, `robo-pen-default` included.
 _Avoid_: robo-pen image, root image.
 
 **Project image**:

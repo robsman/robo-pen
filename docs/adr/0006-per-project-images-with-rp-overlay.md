@@ -8,7 +8,7 @@ A single global image cannot satisfy every project: one wants R + DuckDB, anothe
 
 ## Why an overlay, not a base-Dockerfile inherit pattern
 
-A user-specified `image: node:22-bookworm` is a raw upstream image — it has no `coder` user, no `rp-fuse`, no `rp-init.sh`, no `/etc/fuse.conf` allow_other. Running it directly fails because PID 1 = `/usr/local/bin/rp-init.sh` does not exist. Two choices:
+A user-specified `image: node:22-trixie` is a raw upstream image — it has no `coder` user, no `rp-fuse`, no `rp-init.sh`, no `/etc/fuse.conf` allow_other. Running it directly fails because PID 1 = `/usr/local/bin/rp-init.sh` does not exist. Two choices:
 
 1. Force users to write `FROM robo-pen-default:latest` in every `.rp/Dockerfile`. Tedious, easy to forget, breaks the `image:` case entirely.
 2. Always wrap user's image with a rp overlay layer that adds the required bits.
@@ -27,12 +27,13 @@ After ensure-exists, the overlay still validates that the chosen user has uid �
 
 ## Build pipeline
 
-1. `rp build-base` (one-time, after install / update of robo-pen-default) builds the `rp-base` image holding `rp-fuse`, `rp-init.sh`, and the dependencies the overlay needs.
-2. `rp build` (run in any project workspace) reads `.rp/config.yaml` and `.rp/Dockerfile`:
-   - if `image:` is set, runs an overlay-only build on top of that image
-   - if `build:` is set or `.rp/Dockerfile` is present, builds the user's image first, then the overlay
-   - otherwise no project image is built; the container uses `rp-base` directly
-3. Containers reference the resulting `:<tag>-rp` image.
+1. `rp build-base` (or `rp setup`'s pull-images path) provides the local `rp-base` image — the overlay's `COPY --from` source for `rp-fuse`, `rp-init.sh`, `rp-init-bootstrap`, `tini`, and `00-container.md`. `rp-base` is never itself the base a project image is `FROM`'d from, including `robo-pen-default` — it's purely an artifact donor the overlay pulls from, for every source kind below.
+2. `rp create`/`rp run` (via the `_ensure` recipe) invoke `scripts/build-project-image.sh`, which reads `.rp/config.yaml` and `.rp/Dockerfile` to resolve the source:
+   - `image:` set → overlay build on top of that image
+   - `build:` set or `.rp/Dockerfile` present → builds the user's Dockerfile first, then the overlay
+   - otherwise → overlay build on top of `robo-pen-default` (built via `rp build`)
+   - Every case runs the same overlay template — there is no path where a container runs off `rp-base` (or any pre-overlay image) directly.
+3. Containers reference the resulting `<container-name>:latest-rp` image.
 
 ## Hard switch on migration
 

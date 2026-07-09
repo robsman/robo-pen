@@ -80,12 +80,14 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}:${{ steps.meta.outputs.version }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}:latest
 
-  # --- Build + push robo-pen-default (linux/arm64). FROMs rp-base, so it
-  # depends on the prior job pushing the tag we read from.
+  # --- Build + push robo-pen-default (linux/arm64). Standalone (FROM
+  # debian:trixie-slim directly, not rp-base) — the rp overlay injects
+  # fuse3/rp-fuse/coder/etc. at `rp create` time for every project image
+  # regardless of source, so robo-pen-default doesn't need them baked in.
+  # No dependency on image-base as a result; the two build in parallel.
   image-default:
     name: Build & push robo-pen-default
     runs-on: ubuntu-24.04-arm
-    needs: image-base
     permissions:
       contents: read
       packages: write
@@ -101,13 +103,6 @@ jobs:
         id: meta
         run: |
           echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
-      # robo-pen-default's Dockerfile says `FROM rp-base` (local tag). We
-      # need it to FROM the just-pushed registry image instead. Swap the
-      # FROM line in a temp Dockerfile to keep the working tree clean.
-      - name: Rewrite FROM to use ghcr.io image
-        run: |
-          sed -i "s|^FROM rp-base.*$|FROM ${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}:${{ steps.meta.outputs.version }}|" Dockerfile
-          head -10 Dockerfile
       - uses: docker/build-push-action@v6
         with:
           context: .

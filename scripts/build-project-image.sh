@@ -262,8 +262,11 @@ FROM $SOURCE_REF
 USER root
 ENV DEBIAN_FRONTEND=noninteractive
 
-# fuse3 — required for rp-fuse to mount /workspace.
-RUN apt-get update && apt-get install -y --no-install-recommends fuse3 \\
+# fuse3 (rp-fuse mounts /workspace with it) + ca-certificates (agent
+# installers curl over HTTPS during install.sh below; bare Debian-slim
+# bases, including robo-pen-default, don't ship it — can't assume any
+# base already has it, same reasoning as fuse3).
+RUN apt-get update && apt-get install -y --no-install-recommends fuse3 ca-certificates \\
     && rm -rf /var/lib/apt/lists/*
 
 # Allow non-root processes to access the FUSE mount.
@@ -381,9 +384,9 @@ done <<<"$FILES_LINES"
 cat <<EOF
 
 # Most agent installers (claude.ai, opencode.ai) drop their binary into
-# \$HOME/.local/bin. Make sure that's on PATH for every container exec; the
-# default Dockerfile sets this for the robo-pen-default image, but overlays
-# applied to arbitrary user images need an explicit ENV here too.
+# \$HOME/.local/bin. Make sure that's on PATH for every container exec —
+# the overlay sets this unconditionally since no base image (including
+# robo-pen-default) can be relied on to have it already.
 ENV PATH=/home/$RP_USER/.local/bin:\$PATH
 
 # Run the profile's install.sh as the container user.

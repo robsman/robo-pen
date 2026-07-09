@@ -340,7 +340,7 @@ What this means concretely: if you list `.env.local` in `.rp/shadow`, the conten
 
 ```
 Dockerfile.base          rp-base: debian-slim + fuse3 + rp-fuse + rp-init.sh + coder
-Dockerfile               robo-pen-default (FROM rp-base) + git/curl/build-essential only (no language runtime, no agent)
+Dockerfile               robo-pen-default: standalone (not FROM rp-base) + git/curl/build-essential only (no language runtime, no agent)
 Justfile                 rp recipes (build-base / build / build-host / create / start / run / lint / ...)
 rp                       thin wrapper; dispatches lint locally, everything else via just
 rp-fuse/                 Go source: FUSE driver + lint + config parser + profile resolver + tests
