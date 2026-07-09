@@ -24,6 +24,9 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && rm -rf /var/lib/apt/lists/*
 
 # ── DuckDB CLI (architecture-aware) ─────────────────────────────
+# `unzip` stays installed after use: r-base-core Depends on it, so
+# purging it here used to cascade-remove R (r-base, r-base-core, every
+# r-cran-* package) via autoremove with no build error to flag it.
 ARG DUCKDB_VERSION=1.4.3
 RUN ARCH=$(dpkg --print-architecture) \
     && curl -fsSL "https://github.com/duckdb/duckdb/releases/download/v${DUCKDB_VERSION}/duckdb_cli-linux-${ARCH}.zip" -o /tmp/duckdb.zip \
@@ -31,7 +34,6 @@ RUN ARCH=$(dpkg --print-architecture) \
     && unzip /tmp/duckdb.zip -d /usr/local/bin \
     && chmod +x /usr/local/bin/duckdb \
     && rm /tmp/duckdb.zip \
-    && apt-get purge -y unzip && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
 # ── just ─────────────────────────────────────────────────────────
