@@ -1,5 +1,5 @@
 # Example: restores the Node 22 + Python/uv + R + DuckDB + just combo that
-# robo-pen-default carried before it was trimmed to a minimal, language-
+# rp-default carried before it was trimmed to a minimal, language-
 # agnostic floor (git + curl + build-essential). Most projects only need
 # one or two of these — prefer picking just those over reusing this whole
 # file wholesale (see the "Pull a pre-built image" / "Build locally from
@@ -10,7 +10,7 @@
 #   build:
 #     dockerfile: Dockerfile.full-toolchain
 
-FROM robo-pen-default
+FROM rp-default
 
 USER root
 ENV DEBIAN_FRONTEND=noninteractive
@@ -42,11 +42,9 @@ RUN ARCH=$(dpkg --print-architecture) \
 # ── just ─────────────────────────────────────────────────────────
 RUN curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
 
-USER coder
-WORKDIR /home/coder
-
 # ── uv (Python package manager) ─────────────────────────────────
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/home/coder/.local/bin:${PATH}"
-
-WORKDIR /home/coder
+# Installed system-wide as root, not per-user: this file builds BEFORE
+# the rp overlay creates the container user, so there's no per-user
+# home to install into yet (the overlay always re-asserts the final
+# USER/WORKDIR/PATH afterward regardless of what this file sets).
+RUN UV_INSTALL_DIR=/usr/local/bin bash -c "curl -LsSf https://astral.sh/uv/install.sh | sh"

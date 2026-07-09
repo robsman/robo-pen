@@ -122,14 +122,14 @@ SLUG=$(echo "$BASE" \
 
 # Append the user to the tag so node/coder variants of the same base
 # coexist in the local daemon.
-BASE_TAG="rp-base-docker:experiment"
+BASE_TAG="rp-system-docker:experiment"
 OUT_TAG="rp-docker-experiment:${SLUG}-${RP_USER}"
 
-# --- Stage 1: build rp-base for docker ----------------------------------
+# --- Stage 1: build rp-system for docker ----------------------------------
 echo ">> [1/2] Building $BASE_TAG (linux/arm64) via buildx ..." >&2
 docker buildx build \
     --platform linux/arm64 \
-    -f "$REPO_DIR/Dockerfile.base" \
+    -f "$REPO_DIR/Dockerfile.system" \
     -t "$BASE_TAG" \
     --load \
     "$REPO_DIR"
@@ -195,7 +195,7 @@ RUN mkdir -p /var/lib/rp/shadow /workspace /usr/local/lib/rp \\
     && chmod 0700 /var/lib/rp \\
     && chown root:root /var/lib/rp /var/lib/rp/shadow
 
-# Pull rp-fuse + init script + setuid bootstrap + tini from the arm64 rp-base.
+# Pull rp-fuse + init script + setuid bootstrap + tini from the arm64 rp-system.
 # The unified ENTRYPOINT is `tini -- rp-init-bootstrap` (ADR-0010); we COPY
 # tini explicitly so the overlay works regardless of whether the user base
 # already ships tini.

@@ -53,8 +53,8 @@ rp cp-from <name> <src> <dest>
 ## Architecture
 
 ```
-Dockerfile.base         — rp-base: minimal debian + fuse3 + rp-fuse + rp-init.sh + coder user
-Dockerfile              — robo-pen-default: standalone (not FROM rp-base) + git/curl/build-essential only; no language runtime, no agent
+Dockerfile.system       — rp-system: minimal debian + fuse3 + rp-fuse + rp-init.sh + coder user
+Dockerfile.default      — rp-default: standalone (not FROM rp-system) + git/curl/build-essential only; no language runtime, no agent
 Justfile                — recipes; container prefix = "rp-" + agent + "-"; bind = invocation_directory()
 rp                      — wrapper that invokes just WITHOUT --working-directory, so just sees the caller's cwd
 rp-fuse/                — Go: FUSE driver, lint, config + profile parsers; tests/ for integration sh
@@ -67,8 +67,8 @@ agent.profiles/<name>/   — built-in agent profile bundles (claude-code is the 
   settings/             — files baked into the image at manifest's files[].dst
   instructions.md       — agent-specific fragment for the composed CLAUDE.md / AGENTS.md
 config/
-  00-container.md       — agent-agnostic container fundamentals (baked into rp-base)
-  10-toolchain-default.md — toolchain table for the minimal default image (baked into robo-pen-default)
+  00-container.md       — agent-agnostic container fundamentals (baked into rp-system)
+  10-toolchain-default.md — toolchain table for the minimal default image (baked into rp-default)
   rp-init.sh            — baked into the image at /usr/local/bin/rp-init.sh; PID 1; execs rp-fuse
 .env.example            — template for ANTHROPIC_API_KEY (also forwarded based on profile manifest's env: list)
 .rp.example/            — template for .rp/ (config.yaml + shadow)
@@ -85,8 +85,8 @@ docs/adr/               — design decisions (ADR-0001..0007)
 - Auth is per-agent: the profile's `manifest.env` declares which host env vars to forward (e.g. `ANTHROPIC_API_KEY` for claude-code); the profile's `login.sh` runs the subscription / interactive auth flow if it exists.
 - `rp create [--name N] [PATH[:ro]...] [-- <container-args>]` aligns with `sbx run`: positional paths become workspaces (1:1 bound, FUSE-shadowed), `:ro` marks a workspace read-only, `--name` overrides the default (basename of first PATH). Extras after `--` flow through to `container create`. Same shape for `rp run`; extras after `--` go to the agent's run script.
 - `rp` defaults to `~/repos/robo-pen`; override with `ROBO_PEN_DIR`.
-- `build-base` builds the foundational `rp-base` image; `build` builds the default `robo-pen-default` image (standalone, not FROM rp-base — the overlay injects rp-base's runtime bits at create time for any project image, same mechanism regardless of source). Both use `{{justfile_directory()}}` as the build context so they work regardless of where `rp` was invoked. `rebuild` no-caches both layers.
-- **Per-project images** (ADR-0006 + ADR-0007): every workspace goes through the overlay. `scripts/build-project-image.sh` reads `.rp/config.yaml` for `image:` / `build:` (defaults to `robo-pen-default`) and the agent profile (defaults to `claude-code`), then composes a final image tagged `<container-name>:latest-rp`. The overlay installs fuse3, validates/creates the configured user, mkdir's `/var/lib/rp` at 0700, COPYs `rp-fuse` + `rp-init.sh` from the locally-tagged `rp-base`, COPYs the agent profile's install.sh / settings / instructions / run scripts, runs install.sh as the configured user, and concatenates `/etc/rp/instructions/*.md` into the agent's `instructions_dst`.
+- `build-base` builds the foundational `rp-system` image; `build` builds the default `rp-default` image (standalone, not FROM rp-system — the overlay injects rp-system's runtime bits at create time for any project image, same mechanism regardless of source). Both use `{{justfile_directory()}}` as the build context so they work regardless of where `rp` was invoked. `rebuild` no-caches both layers.
+- **Per-project images** (ADR-0006 + ADR-0007): every workspace goes through the overlay. `scripts/build-project-image.sh` reads `.rp/config.yaml` for `image:` / `build:` (defaults to `rp-default`) and the agent profile (defaults to `claude-code`), then composes a final image tagged `<container-name>:latest-rp`. The overlay installs fuse3, validates/creates the configured user, mkdir's `/var/lib/rp` at 0700, COPYs `rp-fuse` + `rp-init.sh` from the locally-tagged `rp-system`, COPYs the agent profile's install.sh / settings / instructions / run scripts, runs install.sh as the configured user, and concatenates `/etc/rp/instructions/*.md` into the agent's `instructions_dst`.
 - **Agent profile lookup** (ADR-0007): workspace `.rp/agents/<name>/manifest.yaml` overrides repo `agent.profiles/<name>/manifest.yaml`. A directory without `manifest.yaml` is treated as not-present; `rp lint` warns on partial workspace overrides.
 - **Edit-config cycle**: changes to `.rp/config.yaml` (agent, image, user, resources, fuse.cache) take effect only at container CREATE time. To pick them up, `rp destroy && rp run` (or `create`). `.rp/shadow` is re-read on every `rp start`, so for shadow-rule-only changes a `rp stop && rp start` suffices.
 - **Debug toggle**: `RP_DEBUG=1 rp create <name>` forwards the env var into the container; `rp-init.sh` then launches `rp-fuse --debug` for verbose FUSE logging. `RP_DEBUG=1 rp build` (via `rp create`) also prints the generated overlay Dockerfile.

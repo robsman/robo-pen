@@ -15,7 +15,7 @@ Containers run by rp need a stable way to reach the host (e.g. a database servic
 - **`--add-host` flag.** Apple Container doesn't support it. Forwarding to the user would mean: works on Docker, breaks on Apple Container. Not worth the divergence.
 - **Bind-mount a generated `/etc/hosts`.** Works in principle, but Apple Container's image setup makes `/etc/hosts` come from the image layer, not from a bind. We'd have to either materialise it pre-container-start (chicken-and-egg with the gateway IP) or accept the same in-container write path init.sh already has.
 - **DNS-only approach via `--dns`.** Apple Container does support `--dns`, but pointing it at the host's resolver doesn't help: there's no DNS server on the host that would respond to `host.containers.internal`. We'd need to run a stub resolver, which is a much bigger lift than appending to `/etc/hosts`.
-- **Use `gawk` strtonum for hex decode in init.sh.** Debian's default awk is mawk, which lacks `strtonum`. Either ship gawk in rp-base (extra dependency) or decode with bash arithmetic — went with bash arithmetic (zero extra dep, the script already requires bash).
+- **Use `gawk` strtonum for hex decode in init.sh.** Debian's default awk is mawk, which lacks `strtonum`. Either ship gawk in rp-system (extra dependency) or decode with bash arithmetic — went with bash arithmetic (zero extra dep, the script already requires bash).
 
 ## Boundaries
 

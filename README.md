@@ -33,7 +33,7 @@ brew install robsman/tap/robo-pen
 rp setup
 ```
 
-`rp setup` installs Apple Container + `jq` + `just`, starts the container service, brings up the builder VM, and pulls the pre-built `rp-base` + `robo-pen-default` images from GHCR (~1.5 GB, one-time). Subsequent invocations are instant.
+`rp setup` installs Apple Container + `jq` + `just`, starts the container service, brings up the builder VM, and pulls the pre-built `rp-system` + `rp-default` images from GHCR (~1.5 GB, one-time). Subsequent invocations are instant.
 
 ### Build images locally instead of pulling
 
@@ -69,7 +69,7 @@ rp start                  # resume
 rp destroy                # remove container (host files untouched)
 rp list                   # show all rp-* containers + their workspace paths
 rp lint                   # check .rp/{shadow,config.yaml,agents/} in cwd
-rp gc                     # remove old rp-base/robo-pen-default image versions (keeps current + :latest)
+rp gc                     # remove old rp-system/rp-default image versions (keeps current + :latest)
 rp purge                  # NUCLEAR: destroy all rp containers + remove all rp images (RP_PURGE_YES=1 to confirm)
 rp --version              # print rp version (matches the pulled image tag)
 ```
@@ -139,7 +139,7 @@ Summary: 2 active, 0 warning, 0 error
 
 .rp/config.yaml: OK
   agent: claude-code (default)
-  image source: default (robo-pen-default)
+  image source: default (rp-default)
   container user: coder (default)
 
 agent profile claude-code: OK (builtin)
@@ -160,7 +160,7 @@ Each container runs one **agent**. Agents are profile bundles that define how to
 
 The container's instruction file (e.g. `~/.claude/CLAUDE.md` for claude-code) is composed at build time from:
 
-1. `00-container.md` (agent-agnostic container fundamentals from `rp-base`)
+1. `00-container.md` (agent-agnostic container fundamentals from `rp-system`)
 2. `10-toolchain.md` (toolchain table from the project image)
 3. `20-agent.md` (the profile's `instructions.md`)
 4. `30-workspace.md` (optional `.rp/instructions.md` in the workspace)
@@ -173,7 +173,7 @@ To switch agents, set `agent: <name>` in `.rp/config.yaml` and `rp destroy && rp
 
 ## Per-project images
 
-The default workspace image is `robo-pen-default` — deliberately minimal and language-agnostic (git + curl + build-essential, no language runtime). If your project needs Node, Python, R, or anything else, drop a `.rp/config.yaml` in your workspace. `.rp.example/Dockerfile.full-toolchain` restores the Node 22 + Python/uv + R + DuckDB + just combo the default used to carry, if you want that whole set back.
+The default workspace image is `rp-default` — deliberately minimal and language-agnostic (git + curl + build-essential, no language runtime). If your project needs Node, Python, R, or anything else, drop a `.rp/config.yaml` in your workspace. `.rp.example/Dockerfile.full-toolchain` restores the Node 22 + Python/uv + R + DuckDB + just combo the default used to carry, if you want that whole set back.
 
 ### Pull a pre-built image
 ```yaml
@@ -339,8 +339,8 @@ What this means concretely: if you list `.env.local` in `.rp/shadow`, the conten
 ## Architecture
 
 ```
-Dockerfile.base          rp-base: debian-slim + fuse3 + rp-fuse + rp-init.sh + coder
-Dockerfile               robo-pen-default: standalone (not FROM rp-base) + git/curl/build-essential only (no language runtime, no agent)
+Dockerfile.system        rp-system: debian-slim + fuse3 + rp-fuse + rp-init.sh + coder
+Dockerfile.default       rp-default: standalone (not FROM rp-system) + git/curl/build-essential only (no language runtime, no agent)
 Justfile                 rp recipes (build-base / build / build-host / create / start / run / lint / ...)
 rp                       thin wrapper; dispatches lint locally, everything else via just
 rp-fuse/                 Go source: FUSE driver + lint + config parser + profile resolver + tests
@@ -349,8 +349,8 @@ scripts/
   resolve-create-args.sh translates .rp/config.yaml + profile env into `container create` flags
 agent.profiles/<name>/   built-in agent profile bundles (claude-code in v1)
 config/
-  00-container.md        agent-agnostic container fundamentals (baked into rp-base)
-  10-toolchain-default.md image toolchain table (baked into robo-pen-default)
+  00-container.md        agent-agnostic container fundamentals (baked into rp-system)
+  10-toolchain-default.md image toolchain table (baked into rp-default)
   rp-init.sh             PID 1: sets up the shadow boundary, execs rp-fuse
 docs/
   adr/                   architecture decision records (ADR-0001..0007)

@@ -1,8 +1,8 @@
-# robo-pen-default — default per-project base image. Used when a workspace
+# rp-default — default per-project base image. Used when a workspace
 # has no `.rp/Dockerfile` and no `.rp/config.yaml` `image:` / `build:` line.
 # Deliberately minimal and language-agnostic: git + curl + a compiler
 # toolchain, no language runtime baked in. Standalone — NOT derived from
-# rp-base. The rp overlay (scripts/build-project-image.sh) injects fuse3,
+# rp-system. The rp overlay (scripts/build-project-image.sh) injects fuse3,
 # rp-fuse, rp-init.sh, the coder user, and everything else rp-specific at
 # `rp create` time, the same way it does for any other `image:`/`build:`
 # choice; baking those in here via inheritance would just mean the overlay

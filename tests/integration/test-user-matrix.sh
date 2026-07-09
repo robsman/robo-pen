@@ -9,7 +9,7 @@
 # images takes minutes; instead we run the three diagnostically important
 # corners:
 #
-#   1. default robo-pen-default + default user (coder)        -> should pass
+#   1. default rp-default + default user (coder)        -> should pass
 #   2. devcontainer node:22 + user: coder                     -> should pass
 #      (image's `node` user has sudo; rp must create a fresh coder)
 #   3. devcontainer node:22 + user: node                      -> should FAIL

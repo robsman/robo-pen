@@ -1,10 +1,10 @@
 set dotenv-load
 
-image := "robo-pen-default"
+image := "rp-default"
 host_dir := invocation_directory()
 host_name := file_name(invocation_directory())
 
-# Pre-built images live at ghcr.io/<owner>/{rp-base,robo-pen-default}.
+# Pre-built images live at ghcr.io/<owner>/{rp-system,rp-default}.
 # Image tag picks the wrapper's embedded RP_VERSION when it's a real
 # release tag (vX.Y.Z); for source-installed copies (RP_VERSION="dev")
 # fall back to :latest. Explicit RP_IMAGE_TAG overrides both. This pins
@@ -13,8 +13,8 @@ registry_owner := env_var_or_default("RP_REGISTRY_OWNER", "robsman")
 rp_version := env_var_or_default("RP_VERSION", "dev")
 default_image_tag := if rp_version =~ "^v[0-9]" { rp_version } else { "latest" }
 image_tag := env_var_or_default("RP_IMAGE_TAG", default_image_tag)
-ghcr_base := "ghcr.io/" + registry_owner + "/rp-base:" + image_tag
-ghcr_default := "ghcr.io/" + registry_owner + "/robo-pen-default:" + image_tag
+ghcr_system := "ghcr.io/" + registry_owner + "/rp-system:" + image_tag
+ghcr_default := "ghcr.io/" + registry_owner + "/rp-default:" + image_tag
 
 # Agent name for THIS workspace, used to disambiguate parallel containers
 # per agent on the same workspace. Resolves at every `just` invocation by
@@ -48,9 +48,9 @@ builder_memory := "8G"
 # ── Apple container setup ────────────────────────────────────────
 
 # Install Apple Container + jq + just, start system services, pull (or
-# build) the rp-base + robo-pen-default images, and bring up the builder.
+# build) the rp-system + rp-default images, and bring up the builder.
 #
-# Default path pulls ghcr.io/<owner>/{rp-base,robo-pen-default}:latest —
+# Default path pulls ghcr.io/<owner>/{rp-system,rp-default}:latest —
 # saves ~15 min on first run. Set RP_BUILD_FROM_SOURCE=1 to force local
 # builds instead (needed for dev work on the Dockerfiles themselves).
 setup:
@@ -131,7 +131,7 @@ builder-reset:
 
 # ── Image ─────────────────────────────────────────────────────────
 
-# Pull pre-built rp-base + robo-pen-default from ghcr.io and re-tag them
+# Pull pre-built rp-system + rp-default from ghcr.io and re-tag them
 # both as `<local>:<version>` (versioned, for `rp gc` to enumerate) and as
 # `<local>` (no tag = :latest, what the rest of the rp tooling references).
 # When the wrapper's RP_VERSION is "dev" the version tag is "latest"; the
@@ -158,45 +158,46 @@ pull-images:
         # the rest of the tooling sees the current version.
         container image tag "$versioned" "$local_name"
     }
-    pull_and_retag {{ghcr_base}} rp-base {{image_tag}}
+    pull_and_retag {{ghcr_system}} rp-system {{image_tag}}
     pull_and_retag {{ghcr_default}} {{image}} {{image_tag}}
 
-# Build rp-base locally (minimal image with rp-fuse + init script); see ADR-0006.
+# Build rp-system locally (minimal image with rp-fuse + init script); see ADR-0006.
 # Most users want `just pull-images` (much faster). Use this when developing
-# on Dockerfile.base or rp-fuse itself.
+# on Dockerfile.system or rp-fuse itself.
 #
-# Also re-tags rp-base:{{image_tag}} (bare -t only produces rp-base:latest).
-# create/_ensure COPY --from=rp-base:{{image_tag}} (pinned per commit
+# Also re-tags rp-system:{{image_tag}} (bare -t only produces rp-system:latest).
+# create/_ensure COPY --from=rp-system:{{image_tag}} (pinned per commit
 # 7045387) — on a brew install image_tag is a real version (e.g. v1.0.10),
 # not latest, so without this tag the overlay build can't find the base
 # locally and Apple Container mistakes the missing ref for a remote pull.
 build-base: builder-ensure
     container build \
-        -f {{justfile_directory()}}/Dockerfile.base \
-        -t rp-base \
+        -f {{justfile_directory()}}/Dockerfile.system \
+        -t rp-system \
         {{justfile_directory()}}
-    container image tag rp-base rp-base:{{image_tag}}
+    container image tag rp-system rp-system:{{image_tag}}
 
-# Build robo-pen-default locally. Standalone (not FROM rp-base — see
-# Dockerfile), but still depends on build-base: `rp create`'s overlay
-# needs a local rp-base:{{image_tag}} to COPY its runtime bits from,
-# regardless of which project image (default or custom) it's overlaying.
+# Build rp-default locally. Standalone (not FROM rp-system — see
+# Dockerfile.default), but still depends on build-base: `rp create`'s
+# overlay needs a local rp-system:{{image_tag}} to COPY its runtime bits
+# from, regardless of which project image (default or custom) it's
+# overlaying.
 build: build-base
-    container build -t {{image}} {{justfile_directory()}}
+    container build -f {{justfile_directory()}}/Dockerfile.default -t {{image}} {{justfile_directory()}}
     container image tag {{image}} {{image}}:{{image_tag}}
 
 # Force-rebuild both images from scratch, no cache. Pre-built images on
 # ghcr.io are NOT touched — this is the "I want a fresh local build" recipe.
 rebuild: builder-ensure
     container build --no-cache \
-        -f {{justfile_directory()}}/Dockerfile.base \
-        -t rp-base \
+        -f {{justfile_directory()}}/Dockerfile.system \
+        -t rp-system \
         {{justfile_directory()}}
-    container image tag rp-base rp-base:{{image_tag}}
-    container build --no-cache -t {{image}} {{justfile_directory()}}
+    container image tag rp-system rp-system:{{image_tag}}
+    container build --no-cache -f {{justfile_directory()}}/Dockerfile.default -t {{image}} {{justfile_directory()}}
     container image tag {{image}} {{image}}:{{image_tag}}
 
-# Remove rp-base + robo-pen-default image tags older than the current
+# Remove rp-system + rp-default image tags older than the current
 # pin. The current pin = whatever `{{image_tag}}` resolves to (the
 # wrapper's RP_VERSION, or `latest`). Skips tags referenced by any live
 # container (Apple Container blocks rm in that case anyway). Project
@@ -213,7 +214,7 @@ gc:
         | sort -u)
     sweep() {
         local repo=$1
-        # Image lines look like: "rp-base   v0.1.0   <id>   ..." — grab
+        # Image lines look like: "rp-system   v0.1.0   <id>   ..." — grab
         # tag column for matching rows.
         container image list 2>/dev/null \
             | awk -v r="$repo" 'NR>1 && $1==r {print $2}' \
@@ -232,12 +233,12 @@ gc:
                     || echo "rp gc: WARN failed to remove $ref" >&2
             done
     }
-    sweep rp-base
+    sweep rp-system
     sweep {{image}}
     echo "rp gc: done (kept :$keep_tag and :latest for both repos)"
 
-# Destroy ALL rp-managed containers AND remove all rp images (rp-base,
-# robo-pen-default, every per-project image). For a full reset after
+# Destroy ALL rp-managed containers AND remove all rp images (rp-system,
+# rp-default, every per-project image). For a full reset after
 # a broken state or before uninstalling. Workspace files on host are
 # untouched. Aggressive — confirm intent before running on a shared
 # machine.
@@ -254,7 +255,7 @@ purge:
         | grep '^rp-' \
         | xargs -r -I {} container delete --force {} >/dev/null 2>&1 || true
     echo "rp purge: removing rp images" >&2
-    for repo in rp-base {{image}}; do
+    for repo in rp-system {{image}}; do
         container image list 2>/dev/null \
             | awk -v r="$repo" 'NR>1 && $1==r {print $1 ":" $2}' \
             | xargs -r -I {} container image rm -f {} >/dev/null 2>&1 || true
@@ -366,7 +367,7 @@ _ensure: _service-ensure
         # build-project-image.sh overlays rp-bits + the configured agent
         # profile onto the user's chosen base. The image tag is derived
         # from the container name.
-        IMAGE_TAG=$( RP_BASE_TAG={{image_tag}} {{justfile_directory()}}/scripts/build-project-image.sh "$WS_PRIMARY" "$CONT_NAME" )
+        IMAGE_TAG=$( RP_SYSTEM_TAG={{image_tag}} {{justfile_directory()}}/scripts/build-project-image.sh "$WS_PRIMARY" "$CONT_NAME" )
         eval "$( {{justfile_directory()}}/scripts/resolve-create-args.sh "$WS_PRIMARY" )"
         if [[ "${CREATE_FLAGS}" != *--memory* ]]; then
             echo "rp: warning — no resources.memory set in .rp/config.yaml; Apple Container's 1G default" >&2
@@ -456,7 +457,7 @@ create: _service-ensure
         echo "Container $CONT_NAME already exists. Use 'rp destroy --name $NAME' first."
         exit 1
     fi
-    IMAGE_TAG=$( RP_BASE_TAG={{image_tag}} {{justfile_directory()}}/scripts/build-project-image.sh "$WS_PRIMARY" "$CONT_NAME" )
+    IMAGE_TAG=$( RP_SYSTEM_TAG={{image_tag}} {{justfile_directory()}}/scripts/build-project-image.sh "$WS_PRIMARY" "$CONT_NAME" )
     eval "$( {{justfile_directory()}}/scripts/resolve-create-args.sh "$WS_PRIMARY" )"
     if [[ "${CREATE_FLAGS}" != *--memory* ]]; then
         echo "rp: warning — no resources.memory set in .rp/config.yaml; Apple Container's 1G default" >&2

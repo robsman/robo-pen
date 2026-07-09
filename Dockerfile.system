@@ -1,8 +1,9 @@
-# rp-base — minimal image holding the rp-fuse binary, the init script, and
+# rp-system — minimal image holding the rp-fuse binary, the init script, and
 # the OS-level bits the rp overlay needs to layer onto any user-chosen image.
-# Built via `rp build-base`. The default `robo-pen-default` image FROMs this;
-# per-project images apply the same rp layer as a final stage atop a user's
-# image of choice (see ADR-0006).
+# Built via `rp build-base`. Purely an artifact donor — nothing is FROM this,
+# including the default `rp-default` image; the overlay COPYs its runtime
+# bits (rp-fuse, rp-init.sh, tini, 00-container.md) into every per-project
+# image at `rp create` time, regardless of source (see ADR-0006).
 
 # ── Stage 1: build rp-fuse + rp-init-bootstrap (Go) ─────────────
 # Two separate Go modules, one shared golang:1.22-alpine build stage.
@@ -24,7 +25,7 @@ COPY rp-init-bootstrap/go.mod ./
 COPY rp-init-bootstrap/main.go ./
 RUN CGO_ENABLED=0 go build -o /out/rp-init-bootstrap -ldflags "-s -w" .
 
-# ── Stage 2: rp-base runtime ────────────────────────────────────
+# ── Stage 2: rp-system runtime ───────────────────────────────────
 FROM debian:trixie-slim
 
 ENV DEBIAN_FRONTEND=noninteractive

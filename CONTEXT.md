@@ -37,11 +37,11 @@ _Avoid_: ignore patterns, ccrignore rules.
 ### Image layers
 
 **Base image**:
-The shared `rp-base` image, built once per robo-pen release via `rp build-base`. Holds the rp-fuse binary, the rp-init.sh script, the agent-agnostic `00-container.md` fragment, and the bits required by the rp overlay (fuse package, fuse.conf, mount-point directories). Not a parent image any project image inherits from — the overlay `COPY --from=rp-base` injects these bits into every project image at build time, `robo-pen-default` included.
+The shared `rp-system` image, built once per robo-pen release via `rp build-base`. Holds the rp-fuse binary, the rp-init.sh script, the agent-agnostic `00-container.md` fragment, and the bits required by the rp overlay (fuse package, fuse.conf, mount-point directories). Not a parent image any project image inherits from — the overlay `COPY --from=rp-system` injects these bits into every project image at build time, `rp-default` included.
 _Avoid_: robo-pen image, root image.
 
 **Project image**:
-The image actually run by a given container. Composed per workspace from the user's chosen base (either `image:` in `.rp/config.yaml`, `build:` from `.rp/Dockerfile`, or the default `robo-pen-default`) plus the rp overlay layer. Tagged `<container-name>:latest-rp`.
+The image actually run by a given container. Composed per workspace from the user's chosen base (either `image:` in `.rp/config.yaml`, `build:` from `.rp/Dockerfile`, or the default `rp-default`) plus the rp overlay layer. Tagged `<container-name>:latest-rp`.
 _Avoid_: container image, per-repo image.
 
 **rp overlay**:
@@ -91,7 +91,7 @@ The `manifest.yaml` at the root of a profile bundle. Declares the profile's `nam
 _Avoid_: profile config, profile spec.
 
 **Composed instructions**:
-The file written by the overlay at the profile's `instructions_dst` (e.g. `/home/coder/.claude/CLAUDE.md` for claude-code). Composed at build time by concatenating `/etc/rp/instructions/*.md` in lexical order: `00-container.md` (from rp-base), `10-toolchain.md` (from the project image), `20-agent.md` (the profile's `instructions.md`), and optionally `30-workspace.md` (from a workspace's `.rp/instructions.md`).
+The file written by the overlay at the profile's `instructions_dst` (e.g. `/home/coder/.claude/CLAUDE.md` for claude-code). Composed at build time by concatenating `/etc/rp/instructions/*.md` in lexical order: `00-container.md` (from rp-system), `10-toolchain.md` (from the project image), `20-agent.md` (the profile's `instructions.md`), and optionally `30-workspace.md` (from a workspace's `.rp/instructions.md`).
 _Avoid_: agent prompt, CLAUDE.md (too specific).
 
 ### FUSE correctness model

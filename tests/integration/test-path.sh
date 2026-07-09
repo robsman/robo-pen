@@ -7,7 +7,7 @@
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 
-# Case A: default base image (robo-pen-default).
+# Case A: default base image (rp-default).
 ws=$(mk_probe path-default)
 cd "$ws"
 "$RP" init >/dev/null
