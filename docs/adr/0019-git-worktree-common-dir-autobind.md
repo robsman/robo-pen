@@ -75,8 +75,10 @@ atomic access to the object store on the host.
   hook that later executes on the host. This is inherent to giving the container
   git write access; shadowing/RO-protecting `hooks/` is a possible follow-up
   (would require the top-level-bind or the raw-bind concept above).
-- Naming/labels are unaffected: the primary workspace (first path) still drives
-  the container name, `rp.host_path` label, and agent/user resolution.
+- Labels are unaffected: the primary workspace (first path) still drives the
+  `rp.host_path` label and agent/user resolution. The container *name* became
+  repo-scoped in ADR-0021, because worktrees named after branches made
+  basename-only names collide across repos.
 
 ## Validation
 

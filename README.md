@@ -74,7 +74,10 @@ rp purge                  # NUCLEAR: destroy all rp containers + remove all rp i
 rp --version              # print rp version (matches the pulled image tag)
 ```
 
-Pass an explicit name as the last argument if you want a different name from the folder basename:
+Containers are named `rp-<agent>-<repo>[-<worktree>]`. At a repo's top level the
+name is just `rp-<agent>-<repo>`; inside a worktree the worktree dir is appended,
+so `main` in two different repos never collides (ADR-0021). Pass an explicit name
+if you want a different one:
 
 ```bash
 rp create --name my-name                       # explicit container name
@@ -101,6 +104,9 @@ Notes:
 - The common git dir is a raw passthrough bind (not FUSE-shadowed), so `rp-init`
   logs one benign `… has no .rp/, skipping` line for it at start. Expected.
 - Disable with `RP_NO_WORKTREE_BIND=1` if you prefer to manage binds yourself.
+- Each worktree gets its own container, named `rp-<agent>-<repo>-<worktree>`
+  (e.g. `rp-claude-code-proj-main`). All worktrees of one repo share one agent
+  volume, so a single `rp login` covers them all — see ADR-0021.
 - Running from the repo top level (the dir holding `.bare/` and every worktree)
   also works — the single 1:1 bind covers everything, so no auto-bind happens.
 
@@ -338,6 +344,25 @@ The container name is no longer a positional arg on `rp create` / `rp run`. Posi
 | `rp create my-name` | `rp create --name my-name` |
 | `rp run my-name "prompt"` | `rp run --name my-name -- "prompt"` |
 | `rp create my-name -- -v /extra:/extra` | `rp create --name my-name . /extra` (1:1 implicit) — or `--name my-name -- -v /extra:/extra` for raw flags |
+
+### Upgrading across repo-scoped container names (2026-08-18)
+
+Default container names became repo-scoped: `rp-<agent>-<repo>[-<worktree>]`
+instead of `rp-<agent>-<basename>`. This only changes workspaces that are git
+worktrees; a plain clone at its top level keeps the exact name it had.
+
+A worktree therefore gets a new container on the next `rp run`, and `rp` prints
+a note naming the old one. Remove it when you are done with it:
+
+```bash
+rp list                       # find the old rp-<agent>-<worktree> entry
+rp destroy --name <old-name>  # e.g. rp destroy --name main
+```
+
+Agent volumes moved with it: the backing dir is now
+`~/.local/share/robo-pen/volumes/rp-<agent>-<repo>/`, shared by every worktree of
+that repo. The first run after the upgrade asks for one `rp login`. Old
+per-worktree volume dirs are left on disk untouched. See ADR-0021.
 | (single workspace at /workspace) | `rp create . /Users/me/docs:ro` (multi-workspace + read-only) |
 
 Existing containers keep working; only the next `rp create` / `rp run` invocation needs the new shape.
@@ -388,7 +413,7 @@ See `CLAUDE.md` for the developer-facing summary and `CONTEXT.md` for the vocabu
 ## Tips
 
 - `rp list` shows every container with the host folder it's anchored to. Run this if you forget which container goes with which project.
-- If `rp` complains about a collision when you `cd` into a different folder, it means a container with that basename already exists anchored elsewhere. Use an explicit name or destroy the old one.
+- If `rp` complains about a collision when you `cd` into a different folder, it means a container with that name already exists anchored elsewhere — usually two repos whose top-level folders share a name. Use an explicit name or destroy the old one.
 - For one-off prompts: `rp run "what does this repo do?"` runs the agent with that prompt and exits.
 - Updating an API key: edit `.env` in the robo-pen repo or export the var in your shell. Existing containers carry the value baked in at create time — `rp destroy && rp run` to pick up a new value.
 

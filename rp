@@ -4,8 +4,10 @@
 # Sandbox-aligned CLI: `rp create [--name N] [PATH[:ro]...] [-- ARGS]`.
 # Multiple PATHs map to independent FUSE-shadowed workspaces (each bound
 # 1:1 host-path-to-container-path). `:ro` suffix marks a workspace
-# read-only. Container name defaults to basename of the first PATH; --name
-# overrides. See ADR-0010 for the workspace + mount model.
+# read-only. Container name defaults to a repo-scoped slug of the first
+# PATH ("<repo>-<worktree>", or "<repo>" at the repo top level); --name
+# overrides. See ADR-0010 for the workspace + mount model, ADR-0021 for
+# the naming rule.
 
 set -euo pipefail
 
@@ -25,6 +27,23 @@ if [[ ! -f "$ROBO_PEN_DIR/Justfile" ]]; then
     echo "Either move the rp script into the robo-pen repo, or export ROBO_PEN_DIR=<path-to-repo>." >&2
     exit 1
 fi
+
+# Default container slug for a workspace. Repo-scoped, so `main` in two
+# different repos does not collide on one container name. See
+# scripts/resolve-workspace-name.sh and ADR-0021.
+rp_default_name() {
+    local ws="$1"
+    local out RP_REPO_SLUG RP_DEFAULT_NAME
+    out=$("$ROBO_PEN_DIR/scripts/resolve-workspace-name.sh" "$ws" 2>/dev/null) || out=""
+    if [[ -n "$out" ]]; then
+        eval "$out"
+        if [[ -n "${RP_DEFAULT_NAME:-}" ]]; then
+            print -r -- "$RP_DEFAULT_NAME"
+            return 0
+        fi
+    fi
+    print -r -- "${ws:t}"
+}
 
 usage() {
     cat <<EOF
@@ -50,7 +69,8 @@ Workspace conventions:
   * PATH defaults to "." (cwd) for create/run.
   * Multiple PATHs become independent FUSE-shadowed workspaces.
   * Append ":ro" to a PATH to mount that workspace read-only.
-  * Container name defaults to basename(first PATH); --name overrides.
+  * Container name defaults to <repo>-<worktree> for the first PATH
+    (just <repo> at the repo top level); --name overrides.
 
 Run 'rp --recipes' for the full just-recipe list.
 EOF
@@ -161,8 +181,7 @@ if (( is_named_recipe )); then
         exit 2
     fi
     if [[ -z "$name" ]]; then
-        # Default: basename of cwd.
-        name="$(basename "$(pwd -P)")"
+        name="$(rp_default_name "$(pwd -P)")"
     fi
     export RP_NAME="$name"
     exec just --justfile "$ROBO_PEN_DIR/Justfile" "$recipe"
@@ -213,11 +232,11 @@ if [[ "${RP_NO_WORKTREE_BIND:-0}" != "1" ]]; then
     fi
 fi
 
-# Default name = basename of first PATH (with :ro suffix stripped).
+# Default name = repo-scoped slug for the first PATH (":ro" stripped).
 if [[ -z "$name" ]]; then
     first="${canon_paths[1]}"
     first="${first%:ro}"
-    name="${first:t}"
+    name="$(rp_default_name "$first")"
 fi
 
 # Hand off to Justfile via env. RP_PATHS_RAW is one entry per line so
