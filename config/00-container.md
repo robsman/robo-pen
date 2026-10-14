@@ -7,7 +7,7 @@ You are running inside an isolated container (Debian trixie). You run as user `c
 - `/workspace` — **Project files**, mediated by `rp-fuse`. All work should happen here.
   - Paths NOT listed in `/workspace/.rp/shadow` pass through to the host bind — edits propagate to the host filesystem normally.
   - Paths LISTED in `/workspace/.rp/shadow` are container-local: their content lives only inside the container's shadow store and never touches the host. Host's matching files are invisible.
-- `/workspace/.rp/shadow` — Read-only inside the container. Edit it from the host to change the shadow rules; restart the container (`rp stop && rp start`) for the change to take effect.
+- `/workspace/.rp/` — Read-only inside the container (shadow rules, `config.yaml`, agent profiles). Edit it from the host to change the shadow rules; restart the container (`rp stop && rp start`) for the change to take effect.
 - `/home/coder` — Your home directory. Ephemeral — lost when the container is destroyed.
 
 ## Installing Extra Packages

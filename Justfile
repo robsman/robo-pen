@@ -302,13 +302,14 @@ test-host: build-host
 test-integration: build-host
     bash {{justfile_directory()}}/tests/integration/run-all.sh
 
-# Run Go unit tests for rp-fuse (rules, lint, config, profile).
+# Run Go unit tests for rp-fuse (rules, lint, config, profile). SYS_ADMIN +
+# /dev/fuse + fuse3 let the FUSE-mounting tests run instead of skipping.
 test-go:
-    container run --rm \
+    container run --rm --cap-add SYS_ADMIN \
         -v "{{justfile_directory()}}/rp-fuse":/src \
         -w /src \
         golang:1.22-alpine \
-        go test ./...
+        sh -c '[ -e /dev/fuse ] || mknod /dev/fuse c 10 229; apk add -q fuse3 >/dev/null && go test ./...'
 
 # Run the rule-matching benchmarks. Compare fast-path vs negation regex
 # (ADR-0011 documents the cliff). Reads numbers from BenchmarkMatch*.

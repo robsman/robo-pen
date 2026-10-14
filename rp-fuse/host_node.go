@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/hanwen/go-fuse/v2/fs"
@@ -62,14 +63,21 @@ func joinRel(parent, name string) string {
 	return parent + "/" + name
 }
 
-// rulesFileName is the workspace-relative path of the shadow rules file. Writes
-// to this path from inside the container are rejected with EROFS — only the
-// host is allowed to modify the ruleset.
-const rulesFileName = ".rp/shadow"
+// protectedDir is the workspace-relative rp config dir (.rp/shadow,
+// config.yaml, agents/, Dockerfile). The whole tree, including the dir
+// itself, is read-only from inside the container — only the host may change
+// it. Guarding just .rp/shadow is not enough: renaming .rp away disables the
+// ruleset on the next start, and config.yaml / Dockerfile edits take effect
+// on the next `rp create`.
+const protectedDir = ".rp"
+
+func isProtected(rel string) bool {
+	return rel == protectedDir || strings.HasPrefix(rel, protectedDir+"/")
+}
 
 func isWriteAccess(flags uint32) bool {
 	mode := int(flags) & syscall.O_ACCMODE
-	return mode == syscall.O_WRONLY || mode == syscall.O_RDWR
+	return mode == syscall.O_WRONLY || mode == syscall.O_RDWR || int(flags)&syscall.O_TRUNC != 0
 }
 
 // shadowPath returns the shadow backing path for a workspace-relative path.
@@ -204,19 +212,19 @@ func (n *HostNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 	return fs.NewListDirStream(entries), 0
 }
 
-// --- .rp/shadow read-only enforcement ---
+// --- .rp/ read-only enforcement ---
 
-// Open: writes to .rp/shadow return EROFS; container cannot modify the ruleset.
+// Open: writes under .rp/ return EROFS; container cannot modify rp config.
 func (n *HostNode) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, syscall.Errno) {
-	if n.relPath() == rulesFileName && isWriteAccess(flags) {
+	if isProtected(n.relPath()) && isWriteAccess(flags) {
 		return nil, 0, syscall.EROFS
 	}
 	return n.LoopbackNode.Open(ctx, flags)
 }
 
-// Setattr: chmod, chown, truncate, etc. on .rp/shadow return EROFS.
+// Setattr: chmod, chown, truncate, etc. under .rp/ return EROFS.
 func (n *HostNode) Setattr(ctx context.Context, fh fs.FileHandle, in *fuse.SetAttrIn, out *fuse.AttrOut) syscall.Errno {
-	if n.relPath() == rulesFileName {
+	if isProtected(n.relPath()) {
 		return syscall.EROFS
 	}
 	return n.LoopbackNode.Setattr(ctx, fh, in, out)
@@ -226,7 +234,7 @@ func (n *HostNode) Setattr(ctx context.Context, fh fs.FileHandle, in *fuse.SetAt
 
 func (n *HostNode) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	childRel := joinRel(n.relPath(), name)
-	if childRel == rulesFileName {
+	if isProtected(childRel) {
 		return nil, syscall.EROFS
 	}
 	if n.cfg.Rules.Match(childRel) {
@@ -245,7 +253,7 @@ func (n *HostNode) Mkdir(ctx context.Context, name string, mode uint32, out *fus
 
 func (n *HostNode) Create(ctx context.Context, name string, flags uint32, mode uint32, out *fuse.EntryOut) (*fs.Inode, fs.FileHandle, uint32, syscall.Errno) {
 	childRel := joinRel(n.relPath(), name)
-	if childRel == rulesFileName {
+	if isProtected(childRel) {
 		return nil, nil, 0, syscall.EROFS
 	}
 	if n.cfg.Rules.Match(childRel) {
@@ -274,7 +282,7 @@ func (n *HostNode) Create(ctx context.Context, name string, flags uint32, mode u
 
 func (n *HostNode) Symlink(ctx context.Context, target, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	childRel := joinRel(n.relPath(), name)
-	if childRel == rulesFileName {
+	if isProtected(childRel) {
 		return nil, syscall.EROFS
 	}
 	if n.cfg.Rules.Match(childRel) {
@@ -293,7 +301,7 @@ func (n *HostNode) Symlink(ctx context.Context, target, name string, out *fuse.E
 
 func (n *HostNode) Mknod(ctx context.Context, name string, mode, rdev uint32, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	childRel := joinRel(n.relPath(), name)
-	if childRel == rulesFileName {
+	if isProtected(childRel) {
 		return nil, syscall.EROFS
 	}
 	if n.cfg.Rules.Match(childRel) {
@@ -312,7 +320,7 @@ func (n *HostNode) Mknod(ctx context.Context, name string, mode, rdev uint32, ou
 
 func (n *HostNode) Unlink(ctx context.Context, name string) syscall.Errno {
 	childRel := joinRel(n.relPath(), name)
-	if childRel == rulesFileName {
+	if isProtected(childRel) {
 		return syscall.EROFS
 	}
 	if n.cfg.Rules.Match(childRel) {
@@ -323,13 +331,46 @@ func (n *HostNode) Unlink(ctx context.Context, name string) syscall.Errno {
 
 func (n *HostNode) Rmdir(ctx context.Context, name string) syscall.Errno {
 	childRel := joinRel(n.relPath(), name)
-	if childRel == rulesFileName {
+	if isProtected(childRel) {
 		return syscall.EROFS
 	}
 	if n.cfg.Rules.Match(childRel) {
 		return fs.ToErrno(syscall.Rmdir(n.shadowPath(childRel)))
 	}
 	return n.LoopbackNode.Rmdir(ctx, name)
+}
+
+// Link: a hard link shares the inode, so linking a .rp/ file out and writing
+// through the link would modify it. Reject links to or from .rp/.
+//
+// Like Rename, links are same-region only; cross-region returns EXDEV.
+// go-fuse's LoopbackNode.Link resolves the target path against the parent's
+// root, so a shadow target linked into the host region would otherwise link
+// the hidden host file at the same path and expose it.
+func (n *HostNode) Link(ctx context.Context, target fs.InodeEmbedder, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	dstRel := joinRel(n.relPath(), name)
+	if isProtected(dstRel) {
+		return nil, syscall.EROFS
+	}
+	if t, ok := target.(*HostNode); ok && isProtected(t.relPath()) {
+		return nil, syscall.EROFS
+	}
+	_, targetShadow := target.(*ShadowNode)
+	dstRule := n.cfg.Rules.Match(dstRel)
+	if targetShadow != dstRule {
+		return nil, syscall.EXDEV
+	}
+	if dstRule {
+		if err := n.ensureShadowParent(ctx, dstRel); err != nil {
+			return nil, fs.ToErrno(err)
+		}
+		src := n.shadowPath(target.EmbeddedInode().Path(nil))
+		if err := syscall.Link(src, n.shadowPath(dstRel)); err != nil {
+			return nil, fs.ToErrno(err)
+		}
+		return n.shadowChild(ctx, dstRel, out)
+	}
+	return n.LoopbackNode.Link(ctx, target, name, out)
 }
 
 // ShadowNode wraps go-fuse's LoopbackNode for the shadow tree so that every
@@ -428,8 +469,27 @@ func (n *ShadowNode) Mknod(ctx context.Context, name string, mode, rdev uint32, 
 	return n.registerShadowChild(ctx, &st), 0
 }
 
+// Link: shadow targets only (cross-region is EXDEV, see HostNode.Link). Done
+// here rather than via LoopbackNode.Link so the child gets a phased Ino.
+func (n *ShadowNode) Link(ctx context.Context, target fs.InodeEmbedder, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	if _, ok := target.(*ShadowNode); !ok {
+		return nil, syscall.EXDEV
+	}
+	p := n.shadowBackingPath(name)
+	src := filepath.Join(n.RootData.Path, target.EmbeddedInode().Path(nil))
+	if err := syscall.Link(src, p); err != nil {
+		return nil, fs.ToErrno(err)
+	}
+	var st syscall.Stat_t
+	if err := syscall.Lstat(p, &st); err != nil {
+		return nil, fs.ToErrno(err)
+	}
+	out.Attr.FromStat(&st)
+	return n.registerShadowChild(ctx, &st), 0
+}
+
 // Rename: same-region only. Cross-region returns EXDEV. Rename touching
-// .rp/shadow on either side returns EROFS (only the host can modify the rules).
+// .rp/ on either side returns EROFS (only the host can modify rp config).
 func (n *HostNode) Rename(ctx context.Context, name string, newParent fs.InodeEmbedder, newName string, flags uint32) syscall.Errno {
 	srcRel := joinRel(n.relPath(), name)
 
@@ -439,7 +499,7 @@ func (n *HostNode) Rename(ctx context.Context, name string, newParent fs.InodeEm
 	}
 	dstRel := joinRel(dstParent.relPath(), newName)
 
-	if srcRel == rulesFileName || dstRel == rulesFileName {
+	if isProtected(srcRel) || isProtected(dstRel) {
 		return syscall.EROFS
 	}
 

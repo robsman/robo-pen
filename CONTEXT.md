@@ -31,7 +31,7 @@ A workspace mounted with `:ro` (e.g. `rp create . /Users/me/docs:ro`). The FUSE 
 _Avoid_: read-only mount (too generic), frozen workspace.
 
 **Shadow rules**:
-The pattern set in `.rp/shadow` that determines which paths are shadowed. Syntax follows `.gitignore`: leading `/` and mid-slash anchor to root, `*` / `**` / `?` / `[…]` globs, trailing `/` for directory-only, `!`-prefix for negation (re-expose a path; last-match-wins). The container sees the file but cannot modify it (writes return EROFS); only the host can edit the rules. To re-expose a subtree under a shadowed parent, use per-child patterns (`dir/*` + `dir/**/*` + `!dir/sub` + `!dir/sub/**`) — `dir/**` alone also matches `dir` itself, which would prevent the FUSE Lookup from drilling into the re-exposed subtree.
+The pattern set in `.rp/shadow` that determines which paths are shadowed. Syntax follows `.gitignore`: leading `/` and mid-slash anchor to root, `*` / `**` / `?` / `[…]` globs, trailing `/` for directory-only, `!`-prefix for negation (re-expose a path; last-match-wins). The container sees the file but cannot modify it (writes return EROFS); only the host can edit the rules. The same applies to the whole `.rp/` tree, including renaming or removing `.rp` itself. To re-expose a subtree under a shadowed parent, use per-child patterns (`dir/*` + `dir/**/*` + `!dir/sub` + `!dir/sub/**`) — `dir/**` alone also matches `dir` itself, which would prevent the FUSE Lookup from drilling into the re-exposed subtree.
 _Avoid_: ignore patterns, ccrignore rules.
 
 ### Image layers
