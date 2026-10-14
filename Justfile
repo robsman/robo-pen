@@ -364,6 +364,14 @@ _ensure: _service-ensure
     set -euo pipefail
     eval "$( {{justfile_directory()}}/scripts/resolve-recipe-ctx.sh "{{host_dir}}" )"
     if ! container list -a -q | grep -qx "$CONT_NAME"; then
+        # Container names became repo-scoped in ADR-0021. Flag a container
+        # left behind under the old basename-only name so it can be removed.
+        legacy_name="${PREFIX}$(basename "$WS_PRIMARY")"
+        if [ "$legacy_name" != "$CONT_NAME" ] && container list -a -q | grep -qx "$legacy_name"; then
+            echo "rp: note — $legacy_name exists under the old basename-only name." >&2
+            echo "    This workspace now uses $CONT_NAME. Remove the old one with:" >&2
+            echo "      rp destroy --name $(basename "$WS_PRIMARY")" >&2
+        fi
         # build-project-image.sh overlays rp-bits + the configured agent
         # profile onto the user's chosen base. The image tag is derived
         # from the container name.
@@ -394,7 +402,7 @@ _ensure: _service-ensure
                 volume_pairs="${volume_pairs},"
             fi
             volume_pairs="${volume_pairs}${cont_mount}=${vol_name}"
-        done < <( {{justfile_directory()}}/scripts/resolve-volumes.sh "$WS_PRIMARY" "$AGENT" "$CONT_NAME" "$USER_NAME" )
+        done < <( {{justfile_directory()}}/scripts/resolve-volumes.sh "$WS_PRIMARY" "$AGENT" "$CONT_NAME" "$USER_NAME" "$VOLUME_KEY" )
         vol_env=()
         if [ -n "$volume_pairs" ]; then
             vol_env+=(-e "RP_VOLUMES=$volume_pairs")
@@ -443,7 +451,7 @@ _ensure: _service-ensure
     # content), but cheap to skip for the warm-start path.
     if [ "${seed_after_start:-0}" = "1" ]; then
         {{justfile_directory()}}/scripts/seed-host-files.sh \
-            "$WS_PRIMARY" "$AGENT" "$CONT_NAME" "$USER_NAME"
+            "$WS_PRIMARY" "$AGENT" "$CONT_NAME" "$USER_NAME" "$VOLUME_KEY"
     fi
 
 # Create a new container with one or more workspaces bound 1:1 (host path
@@ -456,6 +464,14 @@ create: _service-ensure
     if container list -a -q | grep -qx "$CONT_NAME"; then
         echo "Container $CONT_NAME already exists. Use 'rp destroy --name $NAME' first."
         exit 1
+    fi
+    # Container names became repo-scoped in ADR-0021. Flag a container
+    # left behind under the old basename-only name so it can be removed.
+    legacy_name="${PREFIX}$(basename "$WS_PRIMARY")"
+    if [ "$legacy_name" != "$CONT_NAME" ] && container list -a -q | grep -qx "$legacy_name"; then
+        echo "rp: note — $legacy_name exists under the old basename-only name." >&2
+        echo "    This workspace now uses $CONT_NAME. Remove the old one with:" >&2
+        echo "      rp destroy --name $(basename "$WS_PRIMARY")" >&2
     fi
     IMAGE_TAG=$( RP_SYSTEM_TAG={{image_tag}} {{justfile_directory()}}/scripts/build-project-image.sh "$WS_PRIMARY" "$CONT_NAME" )
     eval "$( {{justfile_directory()}}/scripts/resolve-create-args.sh "$WS_PRIMARY" )"
@@ -479,7 +495,7 @@ create: _service-ensure
             volume_pairs="${volume_pairs},"
         fi
         volume_pairs="${volume_pairs}${cont_mount}=${vol_name}"
-    done < <( {{justfile_directory()}}/scripts/resolve-volumes.sh "$WS_PRIMARY" "$AGENT" "$CONT_NAME" "$USER_NAME" )
+    done < <( {{justfile_directory()}}/scripts/resolve-volumes.sh "$WS_PRIMARY" "$AGENT" "$CONT_NAME" "$USER_NAME" "$VOLUME_KEY" )
     vol_env=()
     if [ -n "$volume_pairs" ]; then
         vol_env+=(-e "RP_VOLUMES=$volume_pairs")
@@ -505,7 +521,7 @@ create: _service-ensure
     # (Apple Container's cp requires state=running). See ADR-0015.
     container start "$CONT_NAME" > /dev/null
     {{justfile_directory()}}/scripts/seed-host-files.sh \
-        "$WS_PRIMARY" "$AGENT" "$CONT_NAME" "$USER_NAME"
+        "$WS_PRIMARY" "$AGENT" "$CONT_NAME" "$USER_NAME" "$VOLUME_KEY"
     echo "Container $CONT_NAME created. Workspaces: $RP_WORKSPACE_ENV (image $IMAGE_TAG${CREATE_FLAGS:+, $CREATE_FLAGS})"
 
 # Start a stopped container

@@ -48,7 +48,10 @@ post=$(container exec -u coder --workdir "/home/coder/.claude" "$cont" \
 assert_eq "$post" "agent-session-marker" "agent write survived destroy+create"
 
 # (4) Verify the host backing dir is where we think it is and contains
-#     the expected file. (Volume root is XDG dir under host home.)
+#     the expected file. (Volume root is XDG dir under host home.) The
+#     backing dir is keyed by repo slug (ADR-0021); a probe workspace is
+#     not a git repo, so its slug is the dir name and the key matches the
+#     container name.
 host_vol_root=${RP_VOLUMES_DIR:-$HOME/.local/share/robo-pen/volumes}
 host_vol="$host_vol_root/$(container_name claude-code volpersist)/claude-home"
 [ -f "$host_vol/rp-test-marker" ] \

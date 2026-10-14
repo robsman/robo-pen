@@ -43,8 +43,8 @@ type ProfileManifest struct {
 // .claude/plugins tree is copied into the claude-home volume's seed
 // location so first container start sees the plugins.
 //
-// Re-installs require destroying the per-container volume backing
-// (rp purge or manually clearing $RP_VOLUMES_DIR/<container>/claude-home/);
+// Re-installs require destroying the per-repo volume backing
+// (rp purge or manually clearing $RP_VOLUMES_DIR/<volume-key>/claude-home/);
 // the init-time seed merge only ADDS missing files, it doesn't refresh
 // existing ones. See ADR-0016.
 type PluginSpec struct {
@@ -80,8 +80,9 @@ type KeychainImport struct {
 // during a session that should carry over: login tokens (~/.claude),
 // history files, agent-local caches.
 //
-// Host-side backing lives at $RP_VOLUMES_DIR/<container-name>/<volume-name>/
-// (default RP_VOLUMES_DIR = ~/.local/share/robo-pen/volumes). Mounted into
+// Host-side backing lives at $RP_VOLUMES_DIR/<volume-key>/<volume-name>/
+// (default RP_VOLUMES_DIR = ~/.local/share/robo-pen/volumes; the key is
+// rp-<agent>-<repo>, shared by every worktree of a repo — see ADR-0020). Mounted into
 // the container at /home/{{user}}/<Mount>. `Mount` MUST be a relative path
 // (an absolute path would let a profile shadow arbitrary locations, e.g.
 // /etc — out of scope; see Validate).
@@ -343,7 +344,7 @@ func validateFileMode(s string) error {
 
 // validateVolumeName accepts lowercase alphanumeric + dashes; same shape as
 // container names. Volume name is used as a directory under
-// $RP_VOLUMES_DIR/<container>/, so we forbid `.`, `..`, slashes, spaces.
+// $RP_VOLUMES_DIR/<volume-key>/, so we forbid `.`, `..`, slashes, spaces.
 func validateVolumeName(name string) error {
 	if name == "" {
 		return errors.New("empty")

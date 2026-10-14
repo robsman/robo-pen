@@ -3,15 +3,19 @@
 # into `container create -v <host-dir>:<container-mount>` arguments.
 #
 # Usage:
-#   scripts/resolve-volumes.sh <workspace-dir> <agent-name> <container-name> <container-user>
+#   scripts/resolve-volumes.sh <workspace-dir> <agent-name> <container-name> <container-user> [volume-key]
 #
 # Outputs (to stdout) one volume per line, tab-separated:
 #   <host-dir>\t<container-mount>\t<volume-name>
 #
 # Also creates each host backing dir on disk
-# ($RP_VOLUMES_DIR/<container-name>/<volume-name>/, default
+# ($RP_VOLUMES_DIR/<volume-key>/<volume-name>/, default
 # RP_VOLUMES_DIR=$HOME/.local/share/robo-pen/volumes). Idempotent —
 # mkdirs only if missing; doesn't touch existing contents.
+#
+# <volume-key> defaults to <container-name>. The Justfile passes the
+# repo-scoped key (rp-<agent>-<repo>) so all worktrees of one repo share
+# one agent state dir — see ADR-0021.
 #
 # The caller (the Justfile) reads the TSV, builds `-v` args, and forwards
 # the volume names + container-mount paths to the in-container init.sh
@@ -20,8 +24,8 @@
 
 set -euo pipefail
 
-if [ "$#" -ne 4 ]; then
-    echo "usage: resolve-volumes.sh <workspace-dir> <agent-name> <container-name> <container-user>" >&2
+if [ "$#" -lt 4 ] || [ "$#" -gt 5 ]; then
+    echo "usage: resolve-volumes.sh <workspace-dir> <agent-name> <container-name> <container-user> [volume-key]" >&2
     exit 2
 fi
 
@@ -29,6 +33,7 @@ WORKSPACE=$1
 AGENT=$2
 CONT_NAME=$3
 RP_USER=$4
+VOLUME_KEY=${5:-$CONT_NAME}
 
 REPO_DIR=$(cd "$(dirname "$0")/.." && pwd)
 RP_FUSE="$REPO_DIR/rp-fuse/rp-fuse-darwin-arm64"
@@ -46,7 +51,7 @@ VOLUMES_DIR=${RP_VOLUMES_DIR:-$HOME/.local/share/robo-pen/volumes}
 "$RP_FUSE" profile --workspace "$WORKSPACE" --repo-dir "$REPO_DIR" --agent "$AGENT" field volumes 2>/dev/null \
     | while IFS=$'\t' read -r vol_name vol_mount; do
         [ -z "$vol_name" ] && continue
-        host_dir="$VOLUMES_DIR/$CONT_NAME/$vol_name"
+        host_dir="$VOLUMES_DIR/$VOLUME_KEY/$vol_name"
         mkdir -p "$host_dir"
         chmod 0700 "$host_dir" 2>/dev/null || true
         cont_mount="/home/$RP_USER/$vol_mount"

@@ -279,6 +279,31 @@ $USER_EXIST_CHECK
 # Hardening invariants per ADR-0005 / ADR-0008 invariant 3.
 RUN test "\$(id -u $RP_USER)" -ne 0 \\
     || (echo "rp-overlay: user '$RP_USER' is root, refusing" >&2; exit 1)
+
+# git: trust every bind-mounted workspace. rp-fuse presents the workspace
+# root owned by root (uid 0) while the agent runs as $RP_USER, so git's
+# dubious-ownership guard aborts every command ("detected dubious
+# ownership"). safe.directory=* is appropriate here: the container is a
+# single-user sandbox over the user's own bind mounts, and \`*\` also covers
+# the auto-bound worktree common dir whose path this build can't know. See
+# ADR-0020. Guarded so non-git bases still build.
+RUN command -v git >/dev/null 2>&1 && git config --system --add safe.directory '*' || true
+
+# git: compare only mtime + size in the index stat cache. The same file has a
+# different inode, uid and gid on each side of the bind (host APFS reports the
+# real values; virtiofs + rp-fuse report a FUSE inode owned by uid 0), so with
+# git's default checkStat every entry looks dirty. git then re-hashes the whole
+# worktree through FUSE, which cost 7.1s instead of 0.4s on a 1841-file repo.
+RUN command -v git >/dev/null 2>&1 && git config --system core.checkStat minimal || true
+
+# git: never rewrite the shared index for a read-only command (the env-var form
+# of --no-optional-locks). The index lives on the host bind, and the untracked
+# cache git keeps inside it cannot work on FUSE ("untracked cache is disabled
+# on this system or location"), so a container \`git status\` would strip the
+# host's cache and make the host rebuild it on its next command. Refreshing the
+# index buys the container nothing anyway: with checkStat=minimal above nothing
+# is stat-dirty. add / commit / checkout still take their lock and write.
+ENV GIT_OPTIONAL_LOCKS=0
 EOF
 
 # strip_sudo (ADR-0009): if the workspace opted in, run a best-effort strip
