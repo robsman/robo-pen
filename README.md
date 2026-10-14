@@ -121,7 +121,7 @@ For every matched path:
 - `rm -rf node_modules && npm install` cycles work normally — host stays untouched.
 - The shadow store survives `rp stop`/`start`. `rp destroy` wipes it.
 
-Edit `.rp/shadow` from the host. Inside the container it is **read-only** — the agent can `cat` it to understand what's filtered but cannot modify the ruleset. Changes require `rp stop && rp start` to take effect.
+Edit `.rp/shadow` from the host. Inside the container the whole `.rp/` tree (rules, `config.yaml`, `agents/`, `Dockerfile`) is **read-only** — the agent can `cat` it to understand what's filtered but cannot modify, rename or delete anything in it. Changes require `rp stop && rp start` to take effect.
 
 See `.rp.example/shadow` for a copy-paste-ready starting point.
 
