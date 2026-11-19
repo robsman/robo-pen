@@ -1,5 +1,7 @@
 # Persistent volumes for agent state (login, caches)
 
+> Partly superseded by ADR-0024: volumes are now keyed by workspace (or repo, for `scope: repo`) instead of container name, and `rp destroy` removes workspace volumes (ADR-0025).
+
 Agents accumulate runtime state inside the container — most importantly login tokens written by `claude login`, but also history files, indexes, and per-agent caches. Pre-volume, all of that lived in the container's writable layer and disappeared the moment `rp destroy` removed the container. Users had to re-login after every config change that required a recreate.
 
 ai-pod handles this with a named volume mounted at the agent user's home. We follow the same pattern but back the volume with a host bind under `~/.local/share/robo-pen/volumes/<container-name>/<volume-name>/` — explicit, inspectable, and trivially cleaned up by `rp purge` (no Apple Container named-volume management to wrangle).
