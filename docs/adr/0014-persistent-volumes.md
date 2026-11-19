@@ -55,7 +55,7 @@ rp create (again):
 ## Boundaries
 
 - Volume mounts are not workspaces. They land in the agent user's home, NOT under any FUSE-shadowed workspace path. Shadow rules don't apply.
-- Volumes are scoped per container name. Two workspaces with the same basename + same agent share a volume — usually fine, occasionally surprising; document that `--name` disambiguates.
+- Volumes are scoped per container name. Two workspaces with the same basename + same agent share a volume — usually fine, occasionally surprising; document that `--name` disambiguates. **Superseded by ADR-0021**: the key is now the repo slug (`rp-<agent>-<repo>`), so every worktree of one repo shares one agent state dir.
 - Volume content is plaintext on the host. Tokens written by `claude login` live in `$RP_VOLUMES_DIR/<cont>/claude-home/.credentials.json` with 0600 perms set by init's chown. Anyone with host access can read them. Same trust model as ai-pod's volume + the existing rp.host_path label; documented in the ADR rather than encrypted.
 - Volumes survive `rp destroy` but not `rp purge`. `purge` is the explicit "scorched earth" hook (gated behind `RP_PURGE_YES=1`).
 - The volume-seed routing in build-project-image.sh only kicks in for `dst` paths that match `/home/<user>/<volume.mount>` exactly or as a prefix. Paths outside any declared volume keep their original semantics.

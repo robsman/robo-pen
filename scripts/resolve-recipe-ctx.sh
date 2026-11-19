@@ -4,7 +4,8 @@
 # The rp wrapper parses the user's CLI (`--name`, positional paths,
 # `:ro` suffix, `--` extras) and exports:
 #   * RP_NAME           — container slug (already final; user-provided
-#                         via --name or derived from basename(first PATH))
+#                         via --name or the repo-scoped default from
+#                         scripts/resolve-workspace-name.sh)
 #   * RP_PATHS_RAW      — newline-separated workspace specs, each
 #                         `<canonical-path>[:ro]`. First line is the
 #                         primary workspace (drives image build, labels,
@@ -19,6 +20,8 @@
 #   USER_NAME       configured container user (coder default)
 #   PREFIX          container-name prefix: "rp-${AGENT}-"
 #   CONT_NAME       full container name: "${PREFIX}${NAME}"
+#   REPO_SLUG       slug of the repo the primary workspace belongs to
+#   VOLUME_KEY      per-repo key for the volume backing dirs (ADR-0021)
 #   IMAGE_TAG       per-project image tag the build emits
 #   WS_LIST_TSV     tab-separated workspace specs (one per line, in order)
 #   EXTRA_TSV       tab-separated extras (one per line)
@@ -63,7 +66,13 @@ else
     rp_workspace_env=$primary
 fi
 
-NAME=${RP_NAME:-$(basename "$primary")}
+# Repo slug + default container slug for the primary workspace. Repo-scoped
+# so worktrees named `main` in different repos get different containers.
+names_out=$( "$REPO_DIR/scripts/resolve-workspace-name.sh" "$primary" ) || exit 1
+eval "$names_out"
+
+NAME=${RP_NAME:-$RP_DEFAULT_NAME}
+REPO_SLUG=$RP_REPO_SLUG
 
 # Agent + user from the primary workspace's .rp/config.yaml. Both fall
 # back to their respective defaults if the binary or file is missing.
@@ -85,6 +94,12 @@ PREFIX="rp-${AGENT}-"
 CONT_NAME="${PREFIX}${NAME}"
 IMAGE_TAG="${CONT_NAME}:latest-rp"
 
+# Volume backing dirs are keyed by repo, not by container, so every
+# worktree of one repo reuses the same agent state (one `rp login` covers
+# them all). Independent of --name on purpose: the state belongs to the
+# repo. Override with RP_VOLUME_KEY. See ADR-0021.
+VOLUME_KEY=${RP_VOLUME_KEY:-"${PREFIX}${REPO_SLUG}"}
+
 extra_tsv=""
 if [ -n "${RP_EXTRA_ARGS_RAW:-}" ]; then
     while IFS= read -r entry; do
@@ -100,6 +115,8 @@ printf 'AGENT=%q\n' "$AGENT"
 printf 'USER_NAME=%q\n' "$USER_NAME"
 printf 'PREFIX=%q\n' "$PREFIX"
 printf 'CONT_NAME=%q\n' "$CONT_NAME"
+printf 'REPO_SLUG=%q\n' "$REPO_SLUG"
+printf 'VOLUME_KEY=%q\n' "$VOLUME_KEY"
 printf 'IMAGE_TAG=%q\n' "$IMAGE_TAG"
 printf 'WS_LIST_TSV=%q\n' "$ws_list_tsv"
 printf 'EXTRA_TSV=%q\n' "$extra_tsv"

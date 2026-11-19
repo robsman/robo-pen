@@ -21,7 +21,7 @@
 # mount at /home/<user>/.claude/ would shadow whatever cp put under it.
 # So for any dst inside a persistent volume's mount path we MUST write
 # directly to the host backing dir at
-# $RP_VOLUMES_DIR/<container>/<volume>/<rel-inside-volume>. The volume
+# $RP_VOLUMES_DIR/<volume-key>/<volume>/<rel-inside-volume>. The volume
 # bind reflects those files into the container.
 #
 # Missing host sources: if_missing=skip (default) → INFO log + continue;
@@ -29,8 +29,8 @@
 
 set -euo pipefail
 
-if [ "$#" -ne 4 ]; then
-    echo "usage: seed-host-files.sh <workspace-dir> <agent-name> <container-name> <container-user>" >&2
+if [ "$#" -lt 4 ] || [ "$#" -gt 5 ]; then
+    echo "usage: seed-host-files.sh <workspace-dir> <agent-name> <container-name> <container-user> [volume-key]" >&2
     exit 2
 fi
 
@@ -38,6 +38,9 @@ WORKSPACE=$1
 AGENT=$2
 CONT_NAME=$3
 RP_USER=$4
+# Must match the key resolve-volumes.sh used to create the backing dirs,
+# or seeded files land beside the volume instead of inside it (ADR-0021).
+VOLUME_KEY=${5:-$CONT_NAME}
 
 REPO_DIR=$(cd "$(dirname "$0")/.." && pwd)
 RP_FUSE="$REPO_DIR/rp-fuse/rp-fuse-darwin-arm64"
@@ -54,7 +57,7 @@ VOLUME_MAP=$(
         field volumes 2>/dev/null \
         | while IFS=$'\t' read -r vol_name vol_mount; do
             [ -z "$vol_name" ] && continue
-            printf '/home/%s/%s\t%s\n' "$RP_USER" "$vol_mount" "$VOLUMES_DIR/$CONT_NAME/$vol_name"
+            printf '/home/%s/%s\t%s\n' "$RP_USER" "$vol_mount" "$VOLUMES_DIR/$VOLUME_KEY/$vol_name"
         done
 )
 

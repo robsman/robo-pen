@@ -23,7 +23,7 @@ A host directory exposed inside the container as a FUSE-shadowed view (passthrou
 _Avoid_: host workspace, project directory (those name the host-side dir, not the container view).
 
 **Primary workspace**:
-The first workspace in a container's workspace list. Drives image-build inputs (`.rp/config.yaml` for agent / user / resources), the default container name (basename), and the `rp.host_path` label used by the collision check on re-attach. Additional workspaces are equal partners at the FUSE level but invisible to image-build resolution.
+The first workspace in a container's workspace list. Drives image-build inputs (`.rp/config.yaml` for agent / user / resources), the default container name (repo-scoped, ADR-0021), and the `rp.host_path` label used by the collision check on re-attach. Additional workspaces are equal partners at the FUSE level but invisible to image-build resolution.
 _Avoid_: main workspace, root workspace.
 
 **Read-only workspace**:
