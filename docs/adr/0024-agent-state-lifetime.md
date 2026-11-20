@@ -14,6 +14,8 @@ ADR-0014 keyed volume backing dirs by container name (`$RP_VOLUMES_DIR/<containe
    - survives `destroy`
    - is shared by parallel tasks of the same repo, as Claude Code intends
    - stays separate from the host's own memory
+
+   Managed settings take precedence over every other scope, so a host `settings.json` copied in by `host_files` cannot override it. The minimum Claude Code version that honours `autoMemoryDirectory` is not documented. The image build verifies it empirically.
 4. **Secondary workspaces don't get their own memory.** The repo of the primary workspace owns the memory scope.
 5. **Shadowed dependencies stay container-local** (`/var/lib/rp/shadow`, ADR-0010). They survive `stop` and `start` but not `recreate`. Unlike session history they can be rebuilt, and `recreate` is rare (ADR-0022). Shared package-manager caches (npm/pnpm store, uv, cargo registry) are the follow-up for faster installs in new worktrees. They probably fit the new volume scopes.
 
