@@ -319,6 +319,16 @@ EOF
 fi
 
 cat <<EOF
+# git over FUSE-shadowed workspaces (ADR-0020). Appended to /etc/gitconfig
+# rather than set via \`git config\`, so it also applies when git is only
+# installed later by the profile's install.sh, and keeps base-image settings.
+#   safe.directory=*         workspace roots read as root-owned through rp-fuse
+#   core.checkStat=minimal   inode/dev/uid/gid never match across the bind
+#   gc.worktreePruneExpire   other worktrees aren't mounted here (ADR-0019)
+# GIT_OPTIONAL_LOCKS=0 keeps \`git status\` from rewriting the shared index.
+RUN printf '[safe]\\n\\tdirectory = *\\n[core]\\n\\tcheckStat = minimal\\n[gc]\\n\\tworktreePruneExpire = never\\n' >> /etc/gitconfig
+ENV GIT_OPTIONAL_LOCKS=0
+
 # Mount points for the shadow boundary + agent entrypoint dir. No
 # fixed workspace path: with 1:1 binds, the workspace is the host path
 # (see ADR-0010 workspace-discovery section).
