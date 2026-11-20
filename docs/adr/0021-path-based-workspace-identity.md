@@ -11,11 +11,12 @@ The underlying mistake is treating the name as the identity. What a user means b
    - Repo slug: the basename of the git common dir with a trailing `.git` removed. If the dir is literally named `.git` or `.bare`, the basename of its parent is used instead. So `~/proj/.git` and `~/proj/.bare` give `proj`, and `~/repos/proj.git` gives `proj`.
    - Workspace part: the git worktree id (the `<id>` in `<common-dir>/worktrees/<id>`). Git keeps it unique within a repository (`main`, `main1`). It is omitted for a main worktree or plain clone. A leading `<repo-slug>-` is stripped, because worktree dirs are commonly named `<repo>-<branch>` and would otherwise give `proj-proj-main`. If stripping leaves an empty part, or the stripped name would collide with another container's name, the full id is kept.
    - Name: `<repo>-<worktree-id>`, or `<repo>` for a main worktree. A non-git directory uses its basename. If a container for a **different** path already holds the name, a numeric suffix is appended (`-2`, `-3`).
-   - Slugs are sanitised to `[A-Za-z0-9._-]`, with leading and trailing dots and dashes trimmed.
-3. **`--name` stays an explicit override**, for creating and addressing a container by name, including several containers on one path.
+   - Slugs are lowercased and sanitised to `[a-z0-9._-]`, with leading and trailing dots and dashes trimmed. Lowercase because the name also ends up in image tags, which must be lowercase.
+   - A subdirectory of a worktree or clone is named like a plain directory, after its basename (see ADR-0019).
+3. **`--name` stays an explicit override**, for creating and addressing a container by name, including several containers on one path. Such containers carry `rp.name_explicit=1`. When several containers share a path, a lookup without `--name` picks the one created without it, and otherwise asks for `--name`.
 4. **On-disk keys use path hashes, not names.** Names can carry collision suffixes and can be overridden, so they are not stable keys. State directories are keyed by the identity:
    - repo key: `<repo-slug>-<hash8(canonical common dir)>`
-   - workspace key: `<container-name>-<hash8(canonical primary workspace path)>`
+   - workspace key: `<container-name>-<hash8(canonical primary workspace path)>`, using the full `rp-<agent>-` name so that containers of different agents on one path keep separate state
 
    The slug only makes the directory recognisable when browsing. The hash guarantees uniqueness, e.g. for two repos both called `proj`. A repo key exists only for git workspaces. The canonical common dir is the one path all worktrees of a repo share, and it is unique per repo in every layout. The repo home from ADR-0023 is not unique in layout C.
 5. **The model applies uniformly** to plain clones, worktrees and non-git directories. A worktree is simply the case where several workspaces share one repo.
