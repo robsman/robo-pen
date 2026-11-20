@@ -15,7 +15,7 @@ ws=$(mk_probe hostfiles)
 # Stage test-controlled host sources OUTSIDE the workspace (inside would
 # be FUSE-shadowed and behave differently).
 seed_dir=$(mktemp -d /tmp/rp-host-files-src.XXXXXX)
-trap "rm -rf '$seed_dir'" EXIT
+on_cleanup "rm -rf '$seed_dir'"
 echo "{\"theme\":\"dark\",\"from\":\"host\"}" > "$seed_dir/settings.json"
 echo "# host CLAUDE.md from test" > "$seed_dir/CLAUDE.md"
 echo "[user]\n    name = host test" > "$seed_dir/gitconfig"

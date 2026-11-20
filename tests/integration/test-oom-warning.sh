@@ -11,8 +11,8 @@ ws=$(mk_probe oom-default)
 cd "$ws"
 "$RP" init >/dev/null
 
-out=$("$RP" create --name oom-default 2>&1 || true)
 remember_container "$(container_name claude-code oom-default)"
+out=$("$RP" create --name oom-default 2>&1 || true)
 assert_contains "$out" "no resources.memory set" "OOM warning fired"
 
 # Now with memory set — warning should NOT appear.
@@ -24,8 +24,8 @@ resources:
   memory: 4G
 EOF
 
-out=$("$RP" create --name oom-explicit 2>&1 || true)
 remember_container "$(container_name claude-code oom-explicit)"
+out=$("$RP" create --name oom-explicit 2>&1 || true)
 if grep -q "no resources.memory set" <<<"$out"; then
     fail "OOM warning fired even though resources.memory is set"
 fi
