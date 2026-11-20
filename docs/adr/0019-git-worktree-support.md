@@ -23,7 +23,7 @@ Three layouts occur in practice:
 7. **Subdirectory workspaces get no git.** If a workspace is a subdirectory of a worktree or clone, the `.git` file above it is not mounted. The wrapper prints a warning naming the worktree root and skips the common-dir bind. Binding just the `.git` file is not an option: git would see every file outside the subdirectory as deleted, and `git commit -a` would commit those deletions.
 8. **Opt-out:** `RP_NO_WORKTREE_BIND=1` disables detection.
 
-The bound common dir is not a workspace. It has no `.rp/`, no shadow rules and no tmpfs cover. `rp-init.sh` must treat it as a git-store bind rather than log it as a workspace without `.rp/`.
+The bound common dir is not a workspace. It has no `.rp/`, no shadow rules and no tmpfs cover. `rp-init.sh` must treat it as a git-store bind rather than log it as a workspace without `.rp/`. The wrapper passes these paths in a separate list (`RP_GIT_DIRS`, entries `path[:ro]`). Read-write entries stay a plain bind. `:ro` entries go through the same fd capture, tmpfs cover and `rp-fuse` mount as workspaces, but without the `.rp/` requirement. `rp-fuse` already handles this: a missing `.rp/shadow` yields an empty rule set, and `:ro` is part of its workspace spec.
 
 ## Rejected alternatives
 
