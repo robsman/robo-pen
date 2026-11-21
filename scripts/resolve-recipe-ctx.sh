@@ -4,6 +4,7 @@
 # The rp wrapper parses the user's CLI (`--name`, positional paths,
 # `:ro` suffix, `--` extras) and exports:
 #   * RP_NAME           — container slug, only when the user passed --name
+#   * RP_NAME_EXPLICIT  — 0 to keep a non-explicit name (rp recreate)
 #   * RP_LOOKUP_ONLY    — 1 for recipes that need an existing container
 #                         (shell, stop, destroy, ...): no new name is chosen
 #   * RP_PATHS_RAW      — newline-separated workspace specs, each
@@ -25,7 +26,6 @@
 #                   WS_PRIMARY, else a new name per ADR-0021
 #   WORKSPACE_KEY   on-disk key for per-workspace state (ADR-0021)
 #   REPO_KEY        on-disk key for per-repo state; empty for non-git
-#   IMAGE_TAG       per-project image tag the build emits
 #   WS_LIST_TSV     tab-separated workspace specs (one per line, in order)
 #   EXTRA_TSV       tab-separated extras (one per line)
 #   RP_WORKSPACE_ENV  value for the in-container RP_WORKSPACE env: space-
@@ -93,7 +93,7 @@ USER_NAME=$(
 PREFIX="rp-${AGENT}-"
 if [ -n "${RP_NAME:-}" ]; then
     NAME=$RP_NAME
-    NAME_EXPLICIT=1
+    NAME_EXPLICIT=${RP_NAME_EXPLICIT:-1}
 else
     NAME_EXPLICIT=0
     index=$(rp_container_index)
@@ -109,7 +109,6 @@ else
     fi
 fi
 CONT_NAME="${PREFIX}${NAME}"
-IMAGE_TAG="${CONT_NAME}:latest-rp"
 WORKSPACE_KEY=$(rp_workspace_key "$CONT_NAME" "$primary")
 rp_git_info "$primary"
 REPO_KEY=""
@@ -133,7 +132,6 @@ printf 'AGENT=%q\n' "$AGENT"
 printf 'USER_NAME=%q\n' "$USER_NAME"
 printf 'PREFIX=%q\n' "$PREFIX"
 printf 'CONT_NAME=%q\n' "$CONT_NAME"
-printf 'IMAGE_TAG=%q\n' "$IMAGE_TAG"
 printf 'WORKSPACE_KEY=%q\n' "$WORKSPACE_KEY"
 printf 'REPO_KEY=%q\n' "$REPO_KEY"
 printf 'WS_LIST_TSV=%q\n' "$ws_list_tsv"

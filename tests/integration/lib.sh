@@ -10,6 +10,7 @@ set -euo pipefail
 
 REPO_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 RP="$REPO_DIR/rp"
+. "$REPO_DIR/tests/integration/lib-sweep.sh"
 
 # Probe state goes in /tmp so the host workspace doesn't get polluted.
 # run-all.sh sets RP_TEST_TMP so it can sweep dirs of tests that died hard.
@@ -17,6 +18,10 @@ TMPROOT=$(mktemp -d "${RP_TEST_TMP:-/tmp}/rp-integration.XXXXXX")
 # Volumes live under TMPROOT, so removing it also removes them instead of
 # leaving one dir per probe in ~/.local/share/robo-pen/volumes.
 export RP_VOLUMES_DIR="$TMPROOT/volumes"
+export RP_LOCK_DIR="$TMPROOT/locks"
+# Project images are shared and named by content hash (ADR-0022), so a test
+# can't know its image names up front: remove the ones created meanwhile.
+project_images > "$TMPROOT/images-before"
 trap "cleanup_probes" EXIT
 # Route signals through the EXIT trap so an interrupted test still cleans up.
 trap "exit 130" INT TERM HUP
@@ -65,10 +70,6 @@ remove_probe_container() {
     # it, `container delete` refuses on running containers and the next
     # test sees leftover state.
     container delete --force "$1" >/dev/null 2>&1 || true
-    # Also remove the per-test image tag (rp-<agent>-<slug>:latest-rp);
-    # otherwise images accumulate across `just test-integration` runs
-    # until the disk fills.
-    container image rm -f "$1:latest-rp" >/dev/null 2>&1 || true
 }
 
 # Usage: rp_create_and_start <slug>
@@ -83,7 +84,6 @@ rp_create_and_start() {
     cont=$(container_name "$agent" "$slug")
     # Recover from prior failed runs that left state behind.
     container delete --force "$cont" >/dev/null 2>&1 || true
-    container image rm -f "$cont:latest-rp" >/dev/null 2>&1 || true
     remember_container "$cont"
     "$RP" create --name "$slug" >/dev/null 2>&1 || fail "rp create --name $slug failed"
     container start "$cont" >/dev/null 2>&1 || fail "container start $cont failed"
@@ -97,6 +97,7 @@ cleanup_probes() {
             remove_probe_container "$c"
         done
     fi
+    remove_new_images "$TMPROOT/images-before"
     for c in "${EXTRA_CLEANUP[@]:-}"; do
         [ -z "$c" ] && continue
         eval "$c" || true

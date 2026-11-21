@@ -63,6 +63,9 @@ func runConfig(args []string) {
 
 func showProjectConfig(c *ProjectConfig, path string) {
 	fmt.Printf("file: %s\n", path)
+	for _, l := range ConfigLayers(path)[1:] {
+		fmt.Printf("local layer: %s\n", l)
+	}
 	agent := c.AgentName()
 	if c.Agent == "" {
 		agent += " (default)"

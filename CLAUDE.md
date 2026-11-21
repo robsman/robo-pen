@@ -27,7 +27,8 @@ rp shell                # bash shell inside the cwd container
 rp login                # run the agent's login flow (e.g. Claude subscription auth)
 rp stop                 # pause container
 rp start                # resume container
-rp destroy              # remove container (workspace files untouched)
+rp destroy              # remove container (workspace files untouched; image kept)
+rp recreate [--rebuild] # rebuild from current .rp/ inputs, keep name + volumes
 
 # Explicit name (--name overrides the cwd-based default)
 rp create --name my-project
@@ -88,7 +89,7 @@ docs/adr/               — design decisions (ADR-0001..0007)
 - `rp create [--name N] [PATH[:ro]...] [-- <container-args>]` aligns with `sbx run`: positional paths become workspaces (1:1 bound, FUSE-shadowed), `:ro` marks a workspace read-only, `--name` overrides the default name (ADR-0021). Extras after `--` flow through to `container create`. Same shape for `rp run`; extras after `--` go to the agent's run script.
 - `rp` defaults to `~/repos/robo-pen`; override with `ROBO_PEN_DIR`.
 - `build-base` builds the foundational `rp-system` image; `build` builds the default `rp-default` image (standalone, not FROM rp-system — the overlay injects rp-system's runtime bits at create time for any project image, same mechanism regardless of source). Both use `{{justfile_directory()}}` as the build context so they work regardless of where `rp` was invoked. `rebuild` no-caches both layers.
-- **Per-project images** (ADR-0006 + ADR-0007): every workspace goes through the overlay. `scripts/build-project-image.sh` reads `.rp/config.yaml` for `image:` / `build:` (defaults to `rp-default`) and the agent profile (defaults to `claude-code`), then composes a final image tagged `<container-name>:latest-rp`. The overlay installs fuse3, validates/creates the configured user, mkdir's `/var/lib/rp` at 0700, COPYs `rp-fuse` + `rp-init.sh` from the locally-tagged `rp-system`, COPYs the agent profile's install.sh / settings / instructions / run scripts, runs install.sh as the configured user, and concatenates `/etc/rp/instructions/*.md` into the agent's `instructions_dst`.
+- **Per-project images** (ADR-0006 + ADR-0007): every workspace goes through the overlay. `scripts/build-project-image.sh` reads `.rp/config.yaml` for `image:` / `build:` (defaults to `rp-default`) and the agent profile (defaults to `claude-code`), then composes a final image tagged `rp-img-<agent>-<hash12>:latest-rp`, content-addressed over the generated overlay and base image identity and reused when it exists (ADR-0022). The overlay installs fuse3, validates/creates the configured user, mkdir's `/var/lib/rp` at 0700, COPYs `rp-fuse` + `rp-init.sh` from the locally-tagged `rp-system`, COPYs the agent profile's install.sh / settings / instructions / run scripts, runs install.sh as the configured user, and concatenates `/etc/rp/instructions/*.md` into the agent's `instructions_dst`.
 - **Agent profile lookup** (ADR-0007): workspace `.rp/agents/<name>/manifest.yaml` overrides repo `agent.profiles/<name>/manifest.yaml`. A directory without `manifest.yaml` is treated as not-present; `rp lint` warns on partial workspace overrides.
 - **Edit-config cycle**: changes to `.rp/config.yaml` (agent, image, user, resources, fuse.cache) take effect only at container CREATE time. To pick them up, `rp destroy && rp run` (or `create`). `.rp/shadow` is re-read on every `rp start`, so for shadow-rule-only changes a `rp stop && rp start` suffices.
 - **Debug toggle**: `RP_DEBUG=1 rp create <name>` forwards the env var into the container; `rp-init.sh` then launches `rp-fuse --debug` for verbose FUSE logging. `RP_DEBUG=1 rp build` (via `rp create`) also prints the generated overlay Dockerfile.

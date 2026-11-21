@@ -586,3 +586,116 @@ func TestProjectConfig_AllowSudoFieldAccessor(t *testing.T) {
 		t.Errorf("empty allow_sudo accessor = %q, want empty", got)
 	}
 }
+
+// writeWorktree fakes the .git indirection of a linked worktree: <wt>/.git
+// points at <common>/worktrees/<id>, whose commondir points back.
+func writeWorktree(t *testing.T, wt, common, id string, relative bool) {
+	t.Helper()
+	admin := filepath.Join(common, "worktrees", id)
+	for _, d := range []string{admin, filepath.Join(wt, ".rp")} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(admin, "commondir"), []byte("../..\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitdir := admin
+	if relative {
+		rel, err := filepath.Rel(wt, admin)
+		if err != nil {
+			t.Fatal(err)
+		}
+		gitdir = rel
+	}
+	if err := os.WriteFile(filepath.Join(wt, ".git"), []byte("gitdir: "+gitdir+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeFile(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRepoHome_Layouts(t *testing.T) {
+	root := t.TempDir()
+	// Layout B: worktree added from a regular checkout.
+	writeWorktree(t, filepath.Join(root, "projb-feat"), filepath.Join(root, "projb", ".git"), "projb-feat", false)
+	// Layout A: bare repo inside the project folder, relative gitdir.
+	writeWorktree(t, filepath.Join(root, "proja", "main"), filepath.Join(root, "proja", ".bare"), "main", true)
+	// Layout C: central bare repo.
+	writeWorktree(t, filepath.Join(root, "src", "projc-main"), filepath.Join(root, "repos", "projc.git"), "projc-main", false)
+	// Plain clone: .git is a directory.
+	if err := os.MkdirAll(filepath.Join(root, "plain", ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct{ ws, want string }{
+		{filepath.Join(root, "projb-feat"), filepath.Join(root, "projb")},
+		{filepath.Join(root, "proja", "main"), filepath.Join(root, "proja")},
+		{filepath.Join(root, "src", "projc-main"), ""},
+		{filepath.Join(root, "plain"), ""},
+		{filepath.Join(root, "missing"), ""},
+	}
+	for _, c := range cases {
+		if got := RepoHome(c.ws); got != c.want {
+			t.Errorf("RepoHome(%s) = %q, want %q", c.ws, got, c.want)
+		}
+	}
+}
+
+func TestParseProjectConfig_RepoHomeFallback(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "proj")
+	wt := filepath.Join(root, "proj-feat")
+	writeWorktree(t, wt, filepath.Join(home, ".git"), "proj-feat", false)
+	writeFile(t, filepath.Join(wt, ".rp", "config.yaml"), "user: coder\nplugins:\n  install:\n    - team@market\n")
+	writeFile(t, filepath.Join(home, ".rp", "config.local.yaml"), "image: home-image\nplugins:\n  install:\n    - personal@market\n")
+	cfgPath := filepath.Join(wt, ".rp", "config.yaml")
+
+	cfg, err := ParseProjectConfig(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Image != "home-image" || cfg.User != "coder" {
+		t.Errorf("image=%q user=%q, want home-image + coder", cfg.Image, cfg.User)
+	}
+	if got := strings.Join(cfg.Plugins.Install, ","); got != "team@market,personal@market" {
+		t.Errorf("plugins.install = %s, want committed then repo-home entries", got)
+	}
+
+	// The worktree's own config.local.yaml is layered last and wins.
+	writeFile(t, filepath.Join(wt, ".rp", "config.local.yaml"), "image: task-image\n")
+	cfg, err = ParseProjectConfig(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Image != "task-image" {
+		t.Errorf("image = %q, want task-image (worktree layer wins)", cfg.Image)
+	}
+	layers := ConfigLayers(cfgPath)
+	if len(layers) != 3 || layers[1] != filepath.Join(home, ".rp", "config.local.yaml") {
+		t.Errorf("layers = %v, want config.yaml, repo home, worktree", layers)
+	}
+}
+
+func TestParseProjectConfig_NoFallbackForCentralBareRepo(t *testing.T) {
+	root := t.TempDir()
+	wt := filepath.Join(root, "src", "projc-main")
+	writeWorktree(t, wt, filepath.Join(root, "repos", "projc.git"), "projc-main", false)
+	// A file in the shared parent of central repos must not leak in.
+	writeFile(t, filepath.Join(root, "repos", ".rp", "config.local.yaml"), "image: wrong\n")
+	cfg, err := ParseProjectConfig(filepath.Join(wt, ".rp", "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Image != "" {
+		t.Errorf("image = %q, want empty (no fallback in layout C)", cfg.Image)
+	}
+}

@@ -202,16 +202,18 @@ rebuild: builder-ensure
 # pin. The current pin = whatever `{{image_tag}}` resolves to (the
 # wrapper's RP_VERSION, or `latest`). Skips tags referenced by any live
 # container (Apple Container blocks rm in that case anyway). Project
-# images (rp-<agent>-<name>:latest-rp) are NOT touched — `rp destroy`
-# removes those.
+# images (rp-img-*, rp-src-*; ADR-0022) are shared between containers, so
+# `rp destroy` keeps them; gc removes the ones no container references.
 gc:
     #!/usr/bin/env bash
     set -euo pipefail
     keep_tag={{image_tag}}
     # Collect tags currently referenced by ANY container (running or stopped)
     # so we don't remove an image a stopped rp container would resume into.
+    # The runtime reports some refs as docker.io/library/<name>; normalise.
     in_use=$(container list -a 2>/dev/null \
         | awk 'NR>1 && $1 != "" {print $2}' \
+        | sed 's#^docker.io/library/##' \
         | sort -u)
     sweep() {
         local repo=$1
@@ -236,7 +238,15 @@ gc:
     }
     sweep rp-system
     sweep {{image}}
-    echo "rp gc: done (kept :$keep_tag and :latest for both repos)"
+    container image list 2>/dev/null \
+        | awk 'NR>1 && ($1 ~ /^rp-img-/ || $1 ~ /^rp-src-/) {print $1 ":" $2}' \
+        | while read -r ref; do
+            grep -qx "$ref" <<<"$in_use" && continue
+            echo "rp gc: removing unused project image $ref" >&2
+            container image rm "$ref" >/dev/null 2>&1 \
+                || echo "rp gc: WARN failed to remove $ref" >&2
+        done
+    echo "rp gc: done (kept :$keep_tag and :latest for both repos, and project images in use)"
 
 # Destroy ALL rp-managed containers AND remove all rp images (rp-system,
 # rp-default, every per-project image). For a full reset after
@@ -367,9 +377,11 @@ _ensure: _service-ensure
     eval "$( {{justfile_directory()}}/scripts/resolve-recipe-ctx.sh "{{host_dir}}" )"
     if ! container list -a -q | grep -qx "$CONT_NAME"; then
         # build-project-image.sh overlays rp-bits + the configured agent
-        # profile onto the user's chosen base. The image tag is derived
-        # from the container name.
-        IMAGE_TAG=$( RP_SYSTEM_TAG={{image_tag}} {{justfile_directory()}}/scripts/build-project-image.sh "$WS_PRIMARY" "$CONT_NAME" )
+        # profile onto the user's chosen base. The image tag is a hash of
+        # its inputs, so an existing image is reused (ADR-0022).
+        IMAGE_TAG=$( RP_SYSTEM_TAG={{image_tag}} {{justfile_directory()}}/scripts/build-project-image.sh "$WS_PRIMARY" )
+        IMAGE_HASH=${IMAGE_TAG%:latest-rp}
+        IMAGE_HASH=${IMAGE_HASH##*-}
         eval "$( {{justfile_directory()}}/scripts/resolve-create-args.sh "$WS_PRIMARY" )"
         if [[ "${CREATE_FLAGS}" != *--memory* ]]; then
             echo "rp: warning — no resources.memory set in .rp/config.yaml; Apple Container's 1G default" >&2
@@ -420,6 +432,7 @@ _ensure: _service-ensure
             --cap-add SYS_ADMIN \
             -l "rp.host_path=$WS_PRIMARY" \
             -l "rp.name_explicit=$NAME_EXPLICIT" \
+            -l "rp.image_hash=$IMAGE_HASH" \
             -l "rp.agent=$AGENT" \
             -l rp.managed=true \
             $CONTAINER_ENV \
@@ -446,6 +459,19 @@ _ensure: _service-ensure
             echo "  rp <recipe> --name <other-name>" >&2
             exit 1
         fi
+        # Warn when the image inputs changed since create (ADR-0022), e.g.
+        # after a branch switch changed .rp/. Never recreate automatically:
+        # that would destroy container-local state mid-task.
+        recorded_hash=$(container inspect "$CONT_NAME" 2>/dev/null | jq -r '.[0].configuration.labels["rp.image_hash"] // empty')
+        if [ -z "$recorded_hash" ]; then
+            echo "rp: $CONT_NAME predates content-addressed images; run 'rp recreate' to migrate it (workspace volumes are kept)." >&2
+        else
+            current_hash=$( RP_SYSTEM_TAG={{image_tag}} {{justfile_directory()}}/scripts/build-project-image.sh --hash-only "$WS_PRIMARY" 2>/dev/null || true )
+            if [ -n "$current_hash" ] && [ "$current_hash" != "$recorded_hash" ]; then
+                echo "rp: the image inputs of $CONT_NAME changed since it was created (.rp/ config, Dockerfile," >&2
+                echo "    agent profile or robo-pen version). Run 'rp recreate' to rebuild; workspace volumes are kept." >&2
+            fi
+        fi
     fi
     state=$(container inspect "$CONT_NAME" 2>/dev/null | jq -r '.[0].status.state' || true)
     if [ "$state" != "running" ]; then
@@ -470,7 +496,9 @@ create: _service-ensure
         echo "Container $CONT_NAME already exists for $WS_PRIMARY. Use 'rp destroy' first, or --name to create another."
         exit 1
     fi
-    IMAGE_TAG=$( RP_SYSTEM_TAG={{image_tag}} {{justfile_directory()}}/scripts/build-project-image.sh "$WS_PRIMARY" "$CONT_NAME" )
+    IMAGE_TAG=$( RP_SYSTEM_TAG={{image_tag}} {{justfile_directory()}}/scripts/build-project-image.sh "$WS_PRIMARY" )
+    IMAGE_HASH=${IMAGE_TAG%:latest-rp}
+    IMAGE_HASH=${IMAGE_HASH##*-}
     eval "$( {{justfile_directory()}}/scripts/resolve-create-args.sh "$WS_PRIMARY" )"
     if [[ "${CREATE_FLAGS}" != *--memory* ]]; then
         echo "rp: warning — no resources.memory set in .rp/config.yaml; Apple Container's 1G default" >&2
@@ -515,6 +543,7 @@ create: _service-ensure
         --cap-add SYS_ADMIN \
         -l "rp.host_path=$WS_PRIMARY" \
         -l "rp.name_explicit=$NAME_EXPLICIT" \
+        -l "rp.image_hash=$IMAGE_HASH" \
         -l "rp.agent=$AGENT" \
         -l rp.managed=true \
         $CONTAINER_ENV \
@@ -605,15 +634,37 @@ cp-to name src dest:
 cp-from name src dest:
     container cp {{name}}:{{src}} {{dest}}
 
-# Stop and remove a container (workspace files on host untouched)
+# Stop and remove a container (workspace files on host untouched). The
+# image stays: images are shared between containers (ADR-0022).
 destroy:
     #!/usr/bin/env bash
     set -uo pipefail
     eval "$( {{justfile_directory()}}/scripts/resolve-recipe-ctx.sh "{{host_dir}}" )"
     container stop "$CONT_NAME" 2>/dev/null || true
     container delete "$CONT_NAME"
-    container image rm -f "$IMAGE_TAG" 2>/dev/null || true
     echo "Container $CONT_NAME removed. Workspace files on host untouched."
+
+# Replace a container with one built from the current .rp/ inputs, keeping
+# its name, workspaces and volumes (ADR-0022). The image is built before
+# the old container is removed, so a failing build leaves it intact.
+# RP_REBUILD=1 (rp recreate --rebuild) forces a fresh image build.
+# Extra `container create` flags given after `--` at create are not kept.
+recreate: _service-ensure
+    #!/usr/bin/env bash
+    set -euo pipefail
+    eval "$( {{justfile_directory()}}/scripts/resolve-recipe-ctx.sh "{{host_dir}}" )"
+    info=$(container inspect "$CONT_NAME" 2>/dev/null) || { echo "rp: no container $CONT_NAME" >&2; exit 1; }
+    workspaces=$(jq -r '.[0].configuration.initProcess.environment[] | select(startswith("RP_WORKSPACE=")) | sub("^RP_WORKSPACE="; "")' <<<"$info")
+    explicit=$(jq -r '.[0].configuration.labels["rp.name_explicit"] // "0"' <<<"$info")
+    [ -n "$workspaces" ] || { echo "rp: cannot read the workspaces of $CONT_NAME" >&2; exit 1; }
+    primary=${workspaces%% *}
+    primary=${primary%:ro}
+    RP_SYSTEM_TAG={{image_tag}} {{justfile_directory()}}/scripts/build-project-image.sh "$primary" >/dev/null
+    container stop "$CONT_NAME" >/dev/null 2>&1 || true
+    container delete "$CONT_NAME" >/dev/null
+    export RP_NAME="$NAME" RP_NAME_EXPLICIT="$explicit" RP_PATHS_RAW="$(tr ' ' '\n' <<<"$workspaces")"
+    unset RP_REBUILD RP_LOOKUP_ONLY RP_EXTRA_ARGS_RAW
+    just --justfile {{justfile()}} create
 
 # ── Info / diagnostics ────────────────────────────────────────────
 

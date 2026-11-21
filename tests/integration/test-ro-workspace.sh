@@ -11,7 +11,6 @@ cd "$ws"
 
 cont=$(container_name claude-code rows)
 container delete --force "$cont" >/dev/null 2>&1 || true
-container image rm -f "$cont:latest-rp" >/dev/null 2>&1 || true
 remember_container "$cont"
 
 "$RP" create --name rows "$ws:ro" >/dev/null 2>&1 \

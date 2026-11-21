@@ -175,21 +175,21 @@ type FuseSpec struct {
 	Cache *float64 `yaml:"cache,omitempty"`
 }
 
-// ParseProjectConfig reads and validates .rp/config.yaml AND, if it
-// exists, the sibling .rp/config.local.yaml. The latter overrides /
-// extends the former so developers can drop personal additions
-// (plugins, host_files, path aliases, etc.) without churning the
-// shared, committed config.yaml. Merge rules — see ProjectConfig.Merge.
+// ParseProjectConfig reads and validates .rp/config.yaml AND the
+// config.local.yaml layers on top of it (ConfigLayers). Local layers
+// override / extend the committed config so developers can drop personal
+// additions (plugins, host_files, path aliases, etc.) without churning
+// the shared, committed config.yaml. Merge rules — see ProjectConfig.Merge.
 //
 // A missing config.yaml yields an empty *ProjectConfig and no error;
-// a missing config.local.yaml is silently skipped.
+// missing config.local.yaml layers are silently skipped.
 func ParseProjectConfig(path string) (*ProjectConfig, error) {
-	base, err := parseSingleConfig(path)
+	layers := ConfigLayers(path)
+	base, err := parseSingleConfig(layers[0])
 	if err != nil {
 		return nil, err
 	}
-	localPath := filepath.Join(filepath.Dir(path), "config.local.yaml")
-	if _, err := os.Stat(localPath); err == nil {
+	for _, localPath := range layers[1:] {
 		local, err := parseSingleConfig(localPath)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", localPath, err)
@@ -200,6 +200,90 @@ func ParseProjectConfig(path string) (*ProjectConfig, error) {
 		}
 	}
 	return base, nil
+}
+
+// ConfigLayers returns the config files ParseProjectConfig merges, in
+// order: the committed config.yaml (always, even if missing), then each
+// existing config.local.yaml layer (ADR-0023):
+//  1. <repo home>/.rp/config.local.yaml, for a linked worktree whose
+//     repo home is not the workspace itself
+//  2. the sibling .rp/config.local.yaml
+func ConfigLayers(path string) []string {
+	layers := []string{path}
+	localPath := filepath.Join(filepath.Dir(path), "config.local.yaml")
+	if filepath.Base(filepath.Dir(path)) == ".rp" {
+		workspace := filepath.Dir(filepath.Dir(path))
+		if home := RepoHome(workspace); home != "" {
+			fallback := filepath.Join(home, ".rp", "config.local.yaml")
+			if fileExists(fallback) && !sameFile(fallback, localPath) {
+				layers = append(layers, fallback)
+			}
+		}
+	}
+	if fileExists(localPath) {
+		layers = append(layers, localPath)
+	}
+	return layers
+}
+
+// RepoHome returns the directory holding a linked worktree's shared
+// config.local.yaml (ADR-0023): the parent of the git common dir when that
+// dir is named .git (a regular checkout, layout B) or .bare (a project
+// folder holding a bare repo and its worktrees, layout A). It returns ""
+// for anything else: not a linked worktree, or a central bare repo
+// (layout C), whose parent is shared by unrelated repos.
+//
+// It parses .git files instead of running git, so every `rp-fuse config`
+// call stays cheap.
+func RepoHome(workspace string) string {
+	data, err := os.ReadFile(filepath.Join(workspace, ".git"))
+	if err != nil {
+		return "" // missing, or a directory (plain clone / main worktree)
+	}
+	line := strings.TrimSpace(string(data))
+	if !strings.HasPrefix(line, "gitdir:") {
+		return ""
+	}
+	gitDir := strings.TrimSpace(strings.TrimPrefix(line, "gitdir:"))
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(workspace, gitDir)
+	}
+	data, err = os.ReadFile(filepath.Join(gitDir, "commondir"))
+	if err != nil {
+		return "" // not a linked worktree (e.g. a submodule)
+	}
+	common := strings.TrimSpace(string(data))
+	if !filepath.IsAbs(common) {
+		common = filepath.Join(gitDir, common)
+	}
+	common = filepath.Clean(common)
+	switch filepath.Base(common) {
+	case ".git", ".bare":
+	default:
+		return ""
+	}
+	home := filepath.Dir(common)
+	if sameFile(home, workspace) {
+		return ""
+	}
+	return home
+}
+
+func fileExists(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && !st.IsDir()
+}
+
+func sameFile(a, b string) bool {
+	sa, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	sb, err := os.Stat(b)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(sa, sb)
 }
 
 func parseSingleConfig(path string) (*ProjectConfig, error) {

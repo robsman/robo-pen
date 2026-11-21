@@ -24,7 +24,10 @@ fi
 export RP_TEST_TMP=$(mktemp -d /tmp/rp-integration-suite.XXXXXX)
 export RP_TEST_LEDGER="$RP_TEST_TMP/containers"
 : > "$RP_TEST_LEDGER"
-trap 'sweep_suite "$RP_TEST_LEDGER" "$RP_TEST_TMP"' EXIT
+# Outside RP_TEST_TMP, which sweep_suite deletes before reading it.
+images_before=$(mktemp)
+project_images > "$images_before"
+trap 'sweep_suite "$RP_TEST_LEDGER" "$RP_TEST_TMP" "$images_before"; rm -f "$images_before"' EXIT
 trap "exit 130" INT TERM HUP
 
 failed=0

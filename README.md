@@ -180,7 +180,7 @@ The default workspace image is `rp-default` — deliberately minimal and languag
 # .rp/config.yaml
 image: python:3.12-slim-trixie
 ```
-On first `rp run` rp composes the overlay onto the image (fuse3, rp-fuse, mount points, user, agent profile install) and tags the result `<container-name>:latest-rp`. Subsequent starts reuse the composed image.
+On first `rp run` rp composes the overlay onto the image (fuse3, rp-fuse, mount points, user, agent profile install) and tags the result `rp-img-<agent>-<hash>:latest-rp`, where the hash covers everything that goes into the image. Any container with the same `.rp/` inputs, such as a new worktree of the same repo, reuses it without building. If the inputs change later (say a branch switch changes `.rp/config.yaml`), `rp run` warns, and `rp recreate` rebuilds while keeping the container's volumes. `rp gc` removes images no container uses.
 
 ### Build locally from your own Dockerfile
 ```yaml

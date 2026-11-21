@@ -41,7 +41,7 @@ The shared `rp-system` image, built once per robo-pen release via `rp build-base
 _Avoid_: robo-pen image, root image.
 
 **Project image**:
-The image actually run by a given container. Composed per workspace from the user's chosen base (either `image:` in `.rp/config.yaml`, `build:` from `.rp/Dockerfile`, or the default `rp-default`) plus the rp overlay layer. Tagged `<container-name>:latest-rp`.
+The image actually run by a given container. Composed per workspace from the user's chosen base (either `image:` in `.rp/config.yaml`, `build:` from `.rp/Dockerfile`, or the default `rp-default`) plus the rp overlay layer. Content-addressed: tagged `rp-img-<agent>-<hash12>:latest-rp` from a hash of its inputs, and shared by every container with the same inputs (ADR-0022).
 _Avoid_: container image, per-repo image.
 
 **rp overlay**:

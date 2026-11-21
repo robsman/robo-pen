@@ -16,7 +16,6 @@ echo "from-b" > "$ws_b/marker.txt"
 
 cont=$(container_name claude-code multi-a)
 container delete --force "$cont" >/dev/null 2>&1 || true
-container image rm -f "$cont:latest-rp" >/dev/null 2>&1 || true
 remember_container "$cont"
 
 # Name derives from basename(first path) = "multi-a"; cwd irrelevant.

@@ -35,6 +35,7 @@ Usage:
   rp shell    [--name N]
   rp login    [--name N]
   rp destroy  [--name N]
+  rp recreate [--name N] [--rebuild]
   rp start    [--name N]
   rp stop     [--name N]
   rp restart  [--name N]
@@ -97,7 +98,7 @@ esac
 WORKSPACE_RECIPES=(create run)
 # Recipes that operate on an existing container (--name optional; defaults
 # to the container bound to cwd).
-NAMED_RECIPES=(shell login destroy start stop restart logs)
+NAMED_RECIPES=(shell login destroy recreate start stop restart logs)
 
 recipe="$1"; shift
 
@@ -116,7 +117,7 @@ if (( ! is_workspace_recipe && ! is_named_recipe )); then
 fi
 
 # Parse the new CLI. Drop stale handoff vars from the caller's environment.
-unset RP_NAME RP_PATHS_RAW RP_LOOKUP_ONLY RP_EXTRA_ARGS_RAW
+unset RP_NAME RP_NAME_EXPLICIT RP_PATHS_RAW RP_LOOKUP_ONLY RP_EXTRA_ARGS_RAW RP_REBUILD
 name=""
 paths=()
 extras=()
@@ -137,6 +138,11 @@ while [[ $# -gt 0 ]]; do
             ;;
         --name=*)
             name="${1#--name=}"
+            shift
+            ;;
+        --rebuild)
+            [[ "$recipe" == recreate ]] || { echo "rp $recipe: --rebuild only applies to recreate" >&2; exit 2 }
+            export RP_REBUILD=1
             shift
             ;;
         --)
