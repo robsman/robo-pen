@@ -8,16 +8,22 @@ ADR-0014 keyed volume backing dirs by container name (`$RP_VOLUMES_DIR/<containe
 
 ## Decision
 
-1. **Workspace-scoped volumes live as long as the workspace, not the container.** They are keyed by the workspace key (ADR-0021) at `$RP_VOLUMES_DIR/workspaces/<workspace-key>/<volume>/`. `rp recreate` replaces the container and keeps the volume, so login, session history and `--resume` survive an image change. `rp destroy` removes it (ADR-0025). Each volume dir stores the canonical workspace path in a small metadata file, so `rp gc` can detect orphans.
+1. **Workspace-scoped volumes live as long as the workspace, not the container.** They are keyed by the workspace key (ADR-0021) at `$RP_VOLUMES_DIR/workspaces/<workspace-key>/<volume>/`. `rp recreate` replaces the container and keeps the volume, so login, session history and `--resume` survive an image change. `rp destroy` removes it (ADR-0025). Each key dir stores what it belongs to in a small metadata file next to the volume dirs (`.workspace`: the canonical workspace path; `.repo`: the git common dir), so `rp gc` can detect orphans. The files sit outside every mount, so the agent can't rewrite them.
 2. **Volumes gain a `scope`** in the profile manifest: `workspace` (the default) or `repo`. Repo-scoped volumes live at `$RP_VOLUMES_DIR/repos/<repo-key>/<volume>/` and are bound into every container whose primary workspace belongs to that repo. Repo-scoped volumes require a git workspace. For a non-git directory they fall back to workspace scope.
 3. **The claude-code profile declares a repo-scoped `claude-memory` volume** and points Claude Code at it with `autoMemoryDirectory`. That setting goes into managed settings in the image (`/etc/claude-code/managed-settings.json`), not into `~/.claude/settings.json`, which `host_files` may overwrite with the host's copy. Memory then:
    - survives `destroy`
    - is shared by parallel tasks of the same repo, as Claude Code intends
    - stays separate from the host's own memory
 
-   Managed settings take precedence over every other scope, so a host `settings.json` copied in by `host_files` cannot override it. The minimum Claude Code version that honours `autoMemoryDirectory` is not documented. The image build verifies it empirically.
+   Managed settings take precedence over every other scope, so a host `settings.json` copied in by `host_files` cannot override it. The minimum Claude Code version that honours `autoMemoryDirectory` is not documented. The profile's `install.sh` checks the installed binary for the setting name and warns at build time if it is missing; memory then stays in the workspace-scoped `~/.claude`.
 4. **Secondary workspaces don't get their own memory.** The repo of the primary workspace owns the memory scope.
 5. **Shadowed dependencies stay container-local** (`/var/lib/rp/shadow`, ADR-0010). They survive `stop` and `start` but not `recreate`. Unlike session history they can be rebuilt, and `recreate` is rare (ADR-0022). Shared package-manager caches (npm/pnpm store, uv, cargo registry) are the follow-up for faster installs in new worktrees. They probably fit the new volume scopes.
+
+## Implementation
+
+- The volume is mounted at `~/.claude-memory` and the managed settings set `"autoMemoryDirectory": "~/.claude-memory"`. The setting names the memory directory itself (`MEMORY.md` plus topic files), not a parent with per-project subdirectories, which fits a volume that already is per repo.
+- Managed settings ship as an ordinary profile `files:` entry. Profile files outside the container user's home are now copied root-owned with mode 0644, so the agent can read but not change them; files inside the home stay user-owned.
+- `resolve-volumes.sh` takes the workspace and repo keys from `resolve-recipe-ctx.sh` and is the single place that maps volumes to host dirs. `seed-host-files.sh` uses it too, so `host_files` aimed into a volume land in the right scope.
 
 ## Rejected alternatives
 
