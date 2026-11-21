@@ -27,7 +27,8 @@ rp shell                # bash shell inside the cwd container
 rp login                # run the agent's login flow (e.g. Claude subscription auth)
 rp stop                 # pause container
 rp start                # resume container
-rp destroy              # remove container (workspace files untouched; image kept)
+rp destroy              # remove container + workspace volumes (workspace files, image, repo memory kept)
+rp gc [--yes] [--memory] [--legacy] # remove orphaned containers/volumes, unused images (ADR-0025)
 rp recreate [--rebuild] # rebuild from current .rp/ inputs, keep name + volumes
 
 # Explicit name (--name overrides the cwd-based default)
@@ -64,6 +65,8 @@ scripts/
   resolve-create-args.sh — translates .rp/config.yaml + agent profile into `container create` flags
   resolve-git-dirs.sh   — git stores to bind besides the workspaces, e.g. a worktree's common dir (ADR-0019)
   lib-identity.sh       — container lookup by path, naming, on-disk keys (ADR-0021)
+  gc.sh                 — `rp gc`: orphan containers/volumes, unused images; lists, then asks (ADR-0025)
+  migrate-legacy-volumes.sh — `rp recreate` moves pre-ADR-0024 volumes to the workspace key
   resolve-volumes.sh    — profile volumes → host backing dirs by scope: workspaces/<key>/ or repos/<key>/ (ADR-0024)
 agent.profiles/<name>/   — built-in agent profile bundles (claude-code is the only one in v1)
   manifest.yaml         — schema in rp-fuse/profile.go (env, files, volumes, entrypoints, instructions_dst)

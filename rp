@@ -43,7 +43,8 @@ Usage:
   rp init [--force]
   rp lint
   rp list | rp stats
-  rp pull-images | rp gc | rp purge
+  rp gc [--yes] [--memory] [--legacy]
+  rp pull-images | rp purge
   rp build | rp build-base | rp build-host | rp rebuild
   rp setup | rp service-start | rp service-stop
   rp --version

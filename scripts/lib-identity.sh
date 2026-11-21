@@ -91,6 +91,16 @@ rp_container_index() {
     ] | @tsv'
 }
 
+# Usage: rp_orphan_count [<index>]
+# Counts containers whose workspace folder no longer exists (ADR-0025).
+rp_orphan_count() {
+    local index=${1-$(rp_container_index)} n=0 path
+    while IFS=$'\t' read -r _ path _; do
+        [ -n "$path" ] && [ ! -d "$path" ] && n=$((n + 1))
+    done <<<"$index"
+    echo "$n"
+}
+
 # Usage: rp_find_container <index> <canonical-path> <agent>
 # Prints the name of the container for this path and agent, or nothing.
 # Several containers can share a path when extra ones were created with

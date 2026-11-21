@@ -66,10 +66,10 @@ rp shell                  # bash shell into the cwd-anchored container
 rp login                  # run the agent's login flow (e.g. Claude subscription auth)
 rp stop                   # pause
 rp start                  # resume
-rp destroy                # remove container (host files untouched)
+rp destroy                # remove container + its volumes (host files and repo memory untouched)
 rp list                   # show all rp-* containers + their workspace paths
 rp lint                   # check .rp/{shadow,config.yaml,agents/} in cwd
-rp gc                     # remove old rp-system/rp-default image versions (keeps current + :latest)
+rp gc                     # list + remove leftovers: containers of deleted folders, unused images (asks first)
 rp purge                  # NUCLEAR: destroy all rp containers + remove all rp images (RP_PURGE_YES=1 to confirm)
 rp --version              # print rp version (matches the pulled image tag)
 ```
@@ -82,7 +82,7 @@ rp create . /Users/me/docs:ro                  # multi-workspace + read-only
 rp run --name my-name -- "summarize the README"
 ```
 
-Agent state lives on the Mac under `~/.local/share/robo-pen/volumes/`. Each container's `~/.claude` (login, session history) belongs to its folder and survives `rp recreate`. Claude Code's auto-memory belongs to the repo: all worktree containers of a repo share it, and it outlives them. It stays separate from the memory of Claude Code sessions on the Mac itself.
+Agent state lives on the Mac under `~/.local/share/robo-pen/volumes/`. Each container's `~/.claude` (login, session history) belongs to its folder and survives `rp recreate`. Claude Code's auto-memory belongs to the repo: all worktree containers of a repo share it, and it outlives them. It stays separate from the memory of Claude Code sessions on the Mac itself. `rp destroy` removes a container's `~/.claude` volume but not the repo's memory. Nothing is cleaned up when you delete a worktree; `rp run` points out containers whose folder is gone, and `rp gc` lists and removes them.
 
 ---
 
@@ -321,6 +321,15 @@ The container name is no longer a positional arg on `rp create` / `rp run`. Posi
 | (single workspace at /workspace) | `rp create . /Users/me/docs:ro` (multi-workspace + read-only) |
 
 Existing containers keep working; only the next `rp create` / `rp run` invocation needs the new shape.
+
+### Upgrading to worktree support
+
+Existing containers keep working under their old names and with their old volumes. `rp run` reminds you that they predate hash-tracked images. Run `rp recreate` in each workspace when convenient: it moves the container's volumes (login, history) to the new per-workspace location and copies its auto-memory into the repo's shared memory, if that is still empty.
+
+Two behaviours change:
+
+- `rp destroy` now also removes the container's `~/.claude` volume. Auto-memory lives in the repo's volume and stays.
+- `rp gc` lists leftovers and asks before removing them. Volume dirs of containers destroyed before the upgrade show up as "legacy"; `rp gc --legacy` removes them.
 
 ---
 

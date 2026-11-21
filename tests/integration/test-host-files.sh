@@ -88,19 +88,19 @@ echo "$got" | grep -q 'skill content' \
 [ -z "$(container exec -u coder --workdir "/home/coder/.claude" "$cont" ls nope.txt 2>&1 | grep -v 'No such')" ] \
     || fail "nope.txt unexpectedly present despite missing host source"
 
-# (6) Persistence across destroy + create — the volume-backed files
+# (6) Persistence across recreate (ADR-0024) — the volume-backed files
 # survive (gitconfig in container layer does NOT — that's expected).
 container exec -u coder --workdir "/home/coder/.claude" "$cont" \
     sh -c 'echo agent-edit > my-state.json' \
     || fail "could not write to volume"
-"$RP" destroy --name hostfiles >/dev/null 2>&1 || fail "rp destroy failed"
-cont=$(rp_create_and_start hostfiles)
+"$RP" recreate --name hostfiles >/dev/null 2>&1 || fail "rp recreate failed"
+container start "$cont" >/dev/null 2>&1 || true
 
 # Volume-backed files come back (settings.json from host_files copy
 # AND the agent's own my-state.json).
 got=$(container exec -u coder --workdir "/home/coder/.claude" "$cont" cat settings.json 2>&1)
 echo "$got" | grep -q '"from":"host"' \
-    || fail "settings.json missing after destroy+create: $got"
+    || fail "settings.json missing after recreate: $got"
 got=$(container exec -u coder --workdir "/home/coder/.claude" "$cont" cat my-state.json 2>&1)
 assert_eq "$got" "agent-edit" "agent write persisted via volume"
 

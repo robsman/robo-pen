@@ -198,55 +198,17 @@ rebuild: builder-ensure
     container build --no-cache -f {{justfile_directory()}}/Dockerfile.default -t {{image}} {{justfile_directory()}}
     container image tag {{image}} {{image}}:{{image_tag}}
 
-# Remove rp-system + rp-default image tags older than the current
-# pin. The current pin = whatever `{{image_tag}}` resolves to (the
-# wrapper's RP_VERSION, or `latest`). Skips tags referenced by any live
-# container (Apple Container blocks rm in that case anyway). Project
-# images (rp-img-*, rp-src-*; ADR-0022) are shared between containers, so
-# `rp destroy` keeps them; gc removes the ones no container references.
-gc:
+# Remove what short-lived workspaces leave behind (ADR-0025): containers
+# and workspace volumes whose folder is gone, and images no container
+# uses (project images, legacy *:latest-rp, rp-system/rp-default tags
+# other than the current pin and :latest). Shows the list and asks;
+# --yes skips the prompt. Repo memory and legacy volume dirs only go with
+# --memory / --legacy.
+gc *FLAGS:
     #!/usr/bin/env bash
     set -euo pipefail
-    keep_tag={{image_tag}}
-    # Collect tags currently referenced by ANY container (running or stopped)
-    # so we don't remove an image a stopped rp container would resume into.
-    # The runtime reports some refs as docker.io/library/<name>; normalise.
-    in_use=$(container list -a 2>/dev/null \
-        | awk 'NR>1 && $1 != "" {print $2}' \
-        | sed 's#^docker.io/library/##' \
-        | sort -u)
-    sweep() {
-        local repo=$1
-        # Image lines look like: "rp-system   v0.1.0   <id>   ..." — grab
-        # tag column for matching rows.
-        container image list 2>/dev/null \
-            | awk -v r="$repo" 'NR>1 && $1==r {print $2}' \
-            | while read -r tag; do
-                [ -z "$tag" ] && continue
-                # Always keep the current pin AND `latest` (last-known-good fallback).
-                [ "$tag" = "$keep_tag" ] && continue
-                [ "$tag" = "latest" ] && continue
-                ref="${repo}:${tag}"
-                if grep -qx "$ref" <<<"$in_use"; then
-                    echo "rp gc: keeping $ref (in use by a container)" >&2
-                    continue
-                fi
-                echo "rp gc: removing $ref" >&2
-                container image rm -f "$ref" >/dev/null 2>&1 \
-                    || echo "rp gc: WARN failed to remove $ref" >&2
-            done
-    }
-    sweep rp-system
-    sweep {{image}}
-    container image list 2>/dev/null \
-        | awk 'NR>1 && ($1 ~ /^rp-img-/ || $1 ~ /^rp-src-/) {print $1 ":" $2}' \
-        | while read -r ref; do
-            grep -qx "$ref" <<<"$in_use" && continue
-            echo "rp gc: removing unused project image $ref" >&2
-            container image rm "$ref" >/dev/null 2>&1 \
-                || echo "rp gc: WARN failed to remove $ref" >&2
-        done
-    echo "rp gc: done (kept :$keep_tag and :latest for both repos, and project images in use)"
+    RP_GC_KEEP_TAG={{image_tag}} RP_GC_BASE_IMAGES="rp-system {{image}}" \
+        {{justfile_directory()}}/scripts/gc.sh {{FLAGS}}
 
 # Destroy ALL rp-managed containers AND remove all rp images (rp-system,
 # rp-default, every per-project image). For a full reset after
@@ -375,6 +337,12 @@ _ensure: _service-ensure
     #!/usr/bin/env bash
     set -euo pipefail
     eval "$( {{justfile_directory()}}/scripts/resolve-recipe-ctx.sh "{{host_dir}}" )"
+    # Hint only: a folder on an unmounted drive looks deleted, so cleanup
+    # waits for an explicit `rp gc` (ADR-0025).
+    orphans=$( . {{justfile_directory()}}/scripts/lib-identity.sh && rp_orphan_count )
+    if [ "${orphans:-0}" -gt 0 ]; then
+        echo "rp: $orphans container(s) belong to folders that no longer exist; 'rp gc' lists and removes them." >&2
+    fi
     if ! container list -a -q | grep -qx "$CONT_NAME"; then
         # build-project-image.sh overlays rp-bits + the configured agent
         # profile onto the user's chosen base. The image tag is a hash of
@@ -433,6 +401,7 @@ _ensure: _service-ensure
             -l "rp.host_path=$WS_PRIMARY" \
             -l "rp.name_explicit=$NAME_EXPLICIT" \
             -l "rp.image_hash=$IMAGE_HASH" \
+        -l "rp.volume_key=$WORKSPACE_KEY" \
             -l "rp.agent=$AGENT" \
             -l rp.managed=true \
             $CONTAINER_ENV \
@@ -464,7 +433,7 @@ _ensure: _service-ensure
         # that would destroy container-local state mid-task.
         recorded_hash=$(container inspect "$CONT_NAME" 2>/dev/null | jq -r '.[0].configuration.labels["rp.image_hash"] // empty')
         if [ -z "$recorded_hash" ]; then
-            echo "rp: $CONT_NAME predates content-addressed images; run 'rp recreate' to migrate it (workspace volumes are kept)." >&2
+            echo "rp: $CONT_NAME predates hash-tracked images; 'rp recreate' migrates it (login, history and memory are kept)." >&2
         else
             current_hash=$( RP_SYSTEM_TAG={{image_tag}} {{justfile_directory()}}/scripts/build-project-image.sh --hash-only "$WS_PRIMARY" 2>/dev/null || true )
             if [ -n "$current_hash" ] && [ "$current_hash" != "$recorded_hash" ]; then
@@ -544,6 +513,7 @@ create: _service-ensure
         -l "rp.host_path=$WS_PRIMARY" \
         -l "rp.name_explicit=$NAME_EXPLICIT" \
         -l "rp.image_hash=$IMAGE_HASH" \
+        -l "rp.volume_key=$WORKSPACE_KEY" \
         -l "rp.agent=$AGENT" \
         -l rp.managed=true \
         $CONTAINER_ENV \
@@ -634,19 +604,33 @@ cp-to name src dest:
 cp-from name src dest:
     container cp {{name}}:{{src}} {{dest}}
 
-# Stop and remove a container (workspace files on host untouched). The
-# image stays: images are shared between containers (ADR-0022).
+# Stop and remove a container and its workspace volumes (ADR-0025).
+# Workspace files on the host, the shared image (ADR-0022) and the repo's
+# memory (ADR-0024) stay. Volumes of a container from before ADR-0024 have
+# no key label; they stay too, and `rp gc --legacy` removes them.
 destroy:
     #!/usr/bin/env bash
     set -uo pipefail
     eval "$( {{justfile_directory()}}/scripts/resolve-recipe-ctx.sh "{{host_dir}}" )"
+    volume_key=$(container inspect "$CONT_NAME" 2>/dev/null | jq -r '.[0].configuration.labels["rp.volume_key"] // empty')
     container stop "$CONT_NAME" 2>/dev/null || true
-    container delete "$CONT_NAME"
-    echo "Container $CONT_NAME removed. Workspace files on host untouched."
+    container delete "$CONT_NAME" || exit 1
+    vol_root=${RP_VOLUMES_DIR:-$HOME/.local/share/robo-pen/volumes}
+    if [[ "$volume_key" =~ ^[a-z0-9._-]+$ ]]; then
+        rm -rf "$vol_root/workspaces/$volume_key"
+        echo "Container $CONT_NAME and its workspace volumes removed. Workspace files on host untouched."
+    else
+        echo "Container $CONT_NAME removed. Workspace files on host untouched."
+        if [ -d "$vol_root/$CONT_NAME" ]; then
+            echo "Its pre-worktree volumes stay at $vol_root/$CONT_NAME ('rp gc --legacy' removes them)."
+        fi
+    fi
 
 # Replace a container with one built from the current .rp/ inputs, keeping
 # its name, workspaces and volumes (ADR-0022). The image is built before
 # the old container is removed, so a failing build leaves it intact.
+# A container from before ADR-0024 is migrated on the way: its volumes
+# move to the workspace key, its auto-memory seeds the repo's (ADR-0025).
 # RP_REBUILD=1 (rp recreate --rebuild) forces a fresh image build.
 # Extra `container create` flags given after `--` at create are not kept.
 recreate: _service-ensure
@@ -662,6 +646,15 @@ recreate: _service-ensure
     RP_SYSTEM_TAG={{image_tag}} {{justfile_directory()}}/scripts/build-project-image.sh "$primary" >/dev/null
     container stop "$CONT_NAME" >/dev/null 2>&1 || true
     container delete "$CONT_NAME" >/dev/null
+    # Keys from the recorded workspace, as create will compute them; the
+    # ctx's are from cwd, which differs under --name.
+    . {{justfile_directory()}}/scripts/lib-identity.sh
+    rp_git_info "$primary"
+    repo_key=""
+    [ -z "$RP_GIT_COMMON" ] || repo_key=$(rp_repo_key "$RP_GIT_COMMON")
+    {{justfile_directory()}}/scripts/migrate-legacy-volumes.sh \
+        "$primary" "$AGENT" "$CONT_NAME" "$(rp_workspace_key "$CONT_NAME" "$primary")" "$repo_key" "$USER_NAME" \
+        || echo "rp: WARN volume migration failed; creating $CONT_NAME anyway" >&2
     export RP_NAME="$NAME" RP_NAME_EXPLICIT="$explicit" RP_PATHS_RAW="$(tr ' ' '\n' <<<"$workspaces")"
     unset RP_REBUILD RP_LOOKUP_ONLY RP_EXTRA_ARGS_RAW
     just --justfile {{justfile()}} create
