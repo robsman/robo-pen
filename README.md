@@ -82,6 +82,8 @@ rp create . /Users/me/docs:ro                  # multi-workspace + read-only
 rp run --name my-name -- "summarize the README"
 ```
 
+Agent state lives on the Mac under `~/.local/share/robo-pen/volumes/`. Each container's `~/.claude` (login, session history) belongs to its folder and survives `rp recreate`. Claude Code's auto-memory belongs to the repo: all worktree containers of a repo share it, and it outlives them. It stays separate from the memory of Claude Code sessions on the Mac itself.
+
 ---
 
 ## `.rp/shadow` — selective shadowing

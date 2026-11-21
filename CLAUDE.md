@@ -64,10 +64,11 @@ scripts/
   resolve-create-args.sh — translates .rp/config.yaml + agent profile into `container create` flags
   resolve-git-dirs.sh   — git stores to bind besides the workspaces, e.g. a worktree's common dir (ADR-0019)
   lib-identity.sh       — container lookup by path, naming, on-disk keys (ADR-0021)
+  resolve-volumes.sh    — profile volumes → host backing dirs by scope: workspaces/<key>/ or repos/<key>/ (ADR-0024)
 agent.profiles/<name>/   — built-in agent profile bundles (claude-code is the only one in v1)
-  manifest.yaml         — schema in rp-fuse/profile.go (env, files, entrypoints, instructions_dst)
+  manifest.yaml         — schema in rp-fuse/profile.go (env, files, volumes, entrypoints, instructions_dst)
   install.sh, run.sh, run-gated.sh, login.sh — lifecycle scripts COPYed into the overlay
-  settings/             — files baked into the image at manifest's files[].dst
+  settings/             — files baked into the image at manifest's files[].dst (user-owned under its home, root-owned elsewhere, e.g. managed-settings.json)
   instructions.md       — agent-specific fragment for the composed CLAUDE.md / AGENTS.md
 config/
   00-container.md       — agent-agnostic container fundamentals (baked into rp-system)

@@ -161,10 +161,11 @@ func profileManifestField(m *ProfileManifest, name string) (string, error) {
 		}
 		return strings.Join(lines, "\n"), nil
 	case "volumes":
-		// One line per volume: "name\tmount" (mount is relative to /home/<user>/).
+		// One line per volume: "name\tmount\tscope" (mount is relative to
+		// /home/<user>/; scope defaults to workspace).
 		var lines []string
 		for _, v := range m.Volumes {
-			lines = append(lines, v.Name+"\t"+v.Mount)
+			lines = append(lines, v.Name+"\t"+v.Mount+"\t"+v.EffectiveScope())
 		}
 		return strings.Join(lines, "\n"), nil
 	case "host_files":

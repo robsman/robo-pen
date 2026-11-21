@@ -215,7 +215,7 @@ volume_seed_target() {
         *) return 0 ;;  # outside any volume's possible mount root
     esac
     local rel_to_home=${expanded_dst#"$home_prefix"}
-    while IFS=$'\t' read -r vol_name vol_mount; do
+    while IFS=$'\t' read -r vol_name vol_mount _; do
         [ -z "$vol_name" ] && continue
         # Match if rel_to_home equals vol_mount or starts with vol_mount/.
         if [ "$rel_to_home" = "$vol_mount" ] || [ "${rel_to_home#"$vol_mount"/}" != "$rel_to_home" ]; then
@@ -356,7 +356,9 @@ done
 # inside a declared volume's mount path, redirect to the seed location
 # under /usr/local/share/rp/seed/<volume>/<rel>; rp-init.sh seeds the
 # volume from there on first launch. Files outside any volume go
-# straight to their absolute in-container path as before.
+# straight to their absolute in-container path: owned by the container
+# user inside its home, root-owned and read-only elsewhere (e.g. Claude
+# Code's managed settings under /etc, which the agent must not edit).
 while IFS=$'\t' read -r src dst; do
     [ -z "$src" ] && continue
     expanded_dst=$(expand_user_template "$dst")
@@ -368,10 +370,13 @@ while IFS=$'\t' read -r src dst; do
         printf '# files[].dst routed to seed for volume %s\n' "$vol_name"
         printf 'RUN mkdir -p %s\n' "$parent_dir"
         printf 'COPY agent/files/%s %s\n' "$src" "$seed_path"
-    else
+    elif [ "${expanded_dst#/home/$RP_USER/}" != "$expanded_dst" ]; then
         parent_dir=$(dirname "$expanded_dst")
         printf 'RUN mkdir -p %s && chown %s:%s %s\n' "$parent_dir" "$RP_USER" "$RP_USER" "$parent_dir"
         printf 'COPY --chown=%s:%s agent/files/%s %s\n' "$RP_USER" "$RP_USER" "$src" "$expanded_dst"
+    else
+        printf 'RUN mkdir -p %s\n' "$(dirname "$expanded_dst")"
+        printf 'COPY --chown=0:0 --chmod=0644 agent/files/%s %s\n' "$src" "$expanded_dst"
     fi
 done <<<"$FILES_LINES"
 

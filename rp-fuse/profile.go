@@ -44,7 +44,7 @@ type ProfileManifest struct {
 // location so first container start sees the plugins.
 //
 // Re-installs require destroying the per-container volume backing
-// (rp purge or manually clearing $RP_VOLUMES_DIR/<container>/claude-home/);
+// (rp purge or manually clearing $RP_VOLUMES_DIR/workspaces/<workspace-key>/claude-home/);
 // the init-time seed merge only ADDS missing files, it doesn't refresh
 // existing ones. See ADR-0016.
 type PluginSpec struct {
@@ -76,18 +76,38 @@ type KeychainImport struct {
 }
 
 // ProfileVolume declares a persistent path inside the container that
-// survives `rp destroy && rp create`. Used for state the agent writes
+// outlives the container (ADR-0024). Used for state the agent writes
 // during a session that should carry over: login tokens (~/.claude),
-// history files, agent-local caches.
+// history files, auto-memory.
 //
-// Host-side backing lives at $RP_VOLUMES_DIR/<container-name>/<volume-name>/
-// (default RP_VOLUMES_DIR = ~/.local/share/robo-pen/volumes). Mounted into
-// the container at /home/{{user}}/<Mount>. `Mount` MUST be a relative path
-// (an absolute path would let a profile shadow arbitrary locations, e.g.
-// /etc — out of scope; see Validate).
+// Scope picks the host-side backing (default RP_VOLUMES_DIR =
+// ~/.local/share/robo-pen/volumes):
+//   - workspace (default): $RP_VOLUMES_DIR/workspaces/<workspace-key>/<name>/,
+//     kept across `rp recreate`, one per container.
+//   - repo: $RP_VOLUMES_DIR/repos/<repo-key>/<name>/, shared by every
+//     container whose primary workspace belongs to the repo. Falls back
+//     to workspace scope outside git.
+//
+// Mounted into the container at /home/{{user}}/<Mount>. `Mount` MUST be a
+// relative path (an absolute path would let a profile shadow arbitrary
+// locations, e.g. /etc — out of scope; see Validate).
 type ProfileVolume struct {
 	Name  string `yaml:"name"`
 	Mount string `yaml:"mount"`
+	Scope string `yaml:"scope,omitempty"`
+}
+
+const (
+	VolumeScopeWorkspace = "workspace"
+	VolumeScopeRepo      = "repo"
+)
+
+// EffectiveScope returns Scope with the workspace default applied.
+func (v ProfileVolume) EffectiveScope() string {
+	if v.Scope == "" {
+		return VolumeScopeWorkspace
+	}
+	return v.Scope
 }
 
 // ProfileFile lists a static file to copy into the image at build time.
@@ -264,6 +284,9 @@ func (m *ProfileManifest) Validate() error {
 			return fmt.Errorf("manifest: volumes[%d].name %q duplicates volumes[%d]", i, v.Name, dup)
 		}
 		volNames[v.Name] = i
+		if v.Scope != "" && v.Scope != VolumeScopeWorkspace && v.Scope != VolumeScopeRepo {
+			return fmt.Errorf("manifest: volumes[%d].scope %q must be %q or %q", i, v.Scope, VolumeScopeWorkspace, VolumeScopeRepo)
+		}
 		if v.Mount == "" {
 			return fmt.Errorf("manifest: volumes[%d]: mount is required", i)
 		}
@@ -343,7 +366,7 @@ func validateFileMode(s string) error {
 
 // validateVolumeName accepts lowercase alphanumeric + dashes; same shape as
 // container names. Volume name is used as a directory under
-// $RP_VOLUMES_DIR/<container>/, so we forbid `.`, `..`, slashes, spaces.
+// $RP_VOLUMES_DIR/<scope>s/<key>/, so we forbid `.`, `..`, slashes, spaces.
 func validateVolumeName(name string) error {
 	if name == "" {
 		return errors.New("empty")

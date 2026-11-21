@@ -405,7 +405,7 @@ _ensure: _service-ensure
             bind_args+=(-v "$p:$p")
             git_dirs_env="${git_dirs_env:+$git_dirs_env }$entry"
         done < <( {{justfile_directory()}}/scripts/resolve-git-dirs.sh "${ws_entries[@]}" )
-        # Persistent volumes declared by the agent profile (ADR-0014).
+        # Persistent volumes declared by the agent profile (ADR-0014, ADR-0024).
         # mkdirs the host backing dir + emits one TSV line per volume.
         # Forward the (mount\tname) pairs to init.sh via RP_VOLUMES so it
         # can chown + seed each mount on container start.
@@ -417,7 +417,7 @@ _ensure: _service-ensure
                 volume_pairs="${volume_pairs},"
             fi
             volume_pairs="${volume_pairs}${cont_mount}=${vol_name}"
-        done < <( {{justfile_directory()}}/scripts/resolve-volumes.sh "$WS_PRIMARY" "$AGENT" "$CONT_NAME" "$USER_NAME" )
+        done < <( {{justfile_directory()}}/scripts/resolve-volumes.sh "$WS_PRIMARY" "$AGENT" "$WORKSPACE_KEY" "$REPO_KEY" "$USER_NAME" )
         vol_env=()
         if [ -n "$volume_pairs" ]; then
             vol_env+=(-e "RP_VOLUMES=$volume_pairs")
@@ -482,7 +482,7 @@ _ensure: _service-ensure
     # content), but cheap to skip for the warm-start path.
     if [ "${seed_after_start:-0}" = "1" ]; then
         {{justfile_directory()}}/scripts/seed-host-files.sh \
-            "$WS_PRIMARY" "$AGENT" "$CONT_NAME" "$USER_NAME"
+            "$WS_PRIMARY" "$AGENT" "$CONT_NAME" "$USER_NAME" "$WORKSPACE_KEY" "$REPO_KEY"
     fi
 
 # Create a new container with one or more workspaces bound 1:1 (host path
@@ -520,7 +520,7 @@ create: _service-ensure
         bind_args+=(-v "$p:$p")
         git_dirs_env="${git_dirs_env:+$git_dirs_env }$entry"
     done < <( {{justfile_directory()}}/scripts/resolve-git-dirs.sh "${ws_entries[@]}" )
-    # Persistent volumes (ADR-0014). Same mechanism as _ensure.
+    # Persistent volumes (ADR-0014, ADR-0024). Same mechanism as _ensure.
     volume_pairs=""
     while IFS=$'\t' read -r host_dir cont_mount vol_name; do
         [ -z "$host_dir" ] && continue
@@ -529,7 +529,7 @@ create: _service-ensure
             volume_pairs="${volume_pairs},"
         fi
         volume_pairs="${volume_pairs}${cont_mount}=${vol_name}"
-    done < <( {{justfile_directory()}}/scripts/resolve-volumes.sh "$WS_PRIMARY" "$AGENT" "$CONT_NAME" "$USER_NAME" )
+    done < <( {{justfile_directory()}}/scripts/resolve-volumes.sh "$WS_PRIMARY" "$AGENT" "$WORKSPACE_KEY" "$REPO_KEY" "$USER_NAME" )
     vol_env=()
     if [ -n "$volume_pairs" ]; then
         vol_env+=(-e "RP_VOLUMES=$volume_pairs")
@@ -558,7 +558,7 @@ create: _service-ensure
     # (Apple Container's cp requires state=running). See ADR-0015.
     container start "$CONT_NAME" > /dev/null
     {{justfile_directory()}}/scripts/seed-host-files.sh \
-        "$WS_PRIMARY" "$AGENT" "$CONT_NAME" "$USER_NAME"
+        "$WS_PRIMARY" "$AGENT" "$CONT_NAME" "$USER_NAME" "$WORKSPACE_KEY" "$REPO_KEY"
     echo "Container $CONT_NAME created. Workspaces: $RP_WORKSPACE_ENV (image $IMAGE_TAG${CREATE_FLAGS:+, $CREATE_FLAGS})"
 
 # Start a stopped container
