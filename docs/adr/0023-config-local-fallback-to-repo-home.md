@@ -17,6 +17,8 @@ Because it is gitignored, a **freshly created worktree doesn't have it**. Withou
 4. For a plain clone or a main worktree, the repo home is the workspace itself, so nothing changes.
 5. **Layout C** (`~/repos/proj.git`) has no fallback: its parent is shared by all central repos. If a worktree there has no `config.local.yaml`, `rp` prints a hint, and the worktree runs with the committed config only. A per-repo host-side file could fill this gap later.
 
+The fallback lives in the config loader (`rp-fuse config`), so every consumer sees the same layers. It finds the repo home by parsing the worktree's `.git` file and the `commondir` it points to, without running git, which keeps the frequent config lookups cheap. A repo home is only recognised when the common dir is named `.git` or `.bare`. Any other name counts as layout C, and only then is the hint printed, at image resolution time.
+
 ## Why the repo home is safe
 
 `config.local.yaml` decides which host files and keychain entries are copied into containers. Anything that can write it effectively controls what leaves the host, so it must not be writable by an agent.
