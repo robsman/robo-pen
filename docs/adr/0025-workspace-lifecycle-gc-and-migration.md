@@ -42,6 +42,13 @@ Existing containers keep working unchanged. They carry `rp.host_path`, so the pa
 
 Legacy volume dirs whose container is already gone have no path metadata. `rp gc` lists them as "legacy, origin unknown" and deletes them only with `--legacy`.
 
+## Implementation
+
+- Containers carry `rp.volume_key` (the workspace key). `rp destroy` removes `workspaces/<rp.volume_key>/`. A legacy container has no such label, so `destroy` leaves its `$RP_VOLUMES_DIR/<container-name>/` in place and says so: that dir may hold auto-memory that was never migrated. `rp gc --legacy` removes it later.
+- `rp gc` is `scripts/gc.sh`. It prompts only when stdin is a terminal; otherwise it prints the list and fails, and `--yes` is required. Images in use are computed against the containers that remain after the planned removals, so an orphaned container's image goes in the same run. Old `rp-system`/`rp-default` tags (everything but the current pin and `:latest`) are swept as before.
+- The `rp run` hint counts orphaned containers only, at the cost of one `container list` call. Orphaned volume dirs need `rp gc` to show up.
+- `rp recreate` migrates after deleting the old container and before creating the new one. A failed migration is reported but doesn't stop the create, so the user is never left without a container. If `workspaces/<key>/` already exists, the legacy dir stays for `rp gc --legacy`. The keys are computed from the recorded workspace rather than the current directory, so `rp recreate --name` from elsewhere migrates to the right place.
+
 ## Rejected alternatives
 
 - **Automatic orphan pruning on every command.** It destroys state on temporarily unavailable paths.
