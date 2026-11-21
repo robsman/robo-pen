@@ -13,11 +13,13 @@ A second problem exists today, independent of worktrees. The image is built only
    - the agent profile files
    - the `rp-system` tag
    - the version of the overlay generator itself, so an overlay change in robo-pen invalidates images
+
+   In practice the hash is taken over the **generated overlay Dockerfile and its build context**, plus the digest of locally built bases (`rp-default`, `rp-system`). The generator turns all inputs above into that output, so hashing it covers them, including the generator version. It also ignores settings that don't affect the image: changing `resources.memory` keeps the hash. A base built from a user Dockerfile is content-addressed the same way (`rp-src-<hash12>`, over the Dockerfile and its context), so the overlay's `FROM` line stays stable.
 2. **Reuse is automatic.** If an image with the tag exists, `rp create` uses it without building. Worktrees of one repo with identical `.rp/` (almost every new worktree) share one image, and so do two plain clones of the same project.
 3. **Concurrent builds are serialised per hash** with a host-side lock, so two worktrees starting at the same time don't build the same image twice.
 4. **The hash is recorded on the container** as label `rp.image_hash`. Every `rp run`, `shell` and `login` recomputes it from the current `.rp/`, which costs a few file hashes and no build, and compares.
-5. **A mismatch warns; it never recreates.** `rp` prints which input changed and suggests `rp recreate`. Recreating in the middle of a task would destroy container-local state (shadowed dependencies, a running agent session), and a prompt would break non-interactive use (`rp run -- "prompt"`). Because images are content-addressed, `rp recreate` is usually fast: the image for the new hash often already exists from another worktree.
-6. **`rp recreate`** replaces the container with one built from the current inputs. It keeps the workspace volume (ADR-0024).
+5. **A mismatch warns; it never recreates.** `rp` says that the image inputs changed (with one hash it cannot name which) and suggests `rp recreate`. Recreating in the middle of a task would destroy container-local state (shadowed dependencies, a running agent session), and a prompt would break non-interactive use (`rp run -- "prompt"`). Because images are content-addressed, `rp recreate` is usually fast: the image for the new hash often already exists from another worktree.
+6. **`rp recreate`** replaces the container with one built from the current inputs. It keeps the name, the workspaces and the workspace volume (ADR-0024). The image is built before the old container is removed, so a failing build leaves it intact. Extra `container create` flags passed after `--` at create time are not carried over.
 
 ## Rejected alternatives
 
@@ -27,6 +29,7 @@ A second problem exists today, independent of worktrees. The image is built only
 
 ## Boundaries
 
+- A `build:` context is hashed in full on every staleness check, just as Docker sends it in full to the builder. Keep it small.
 - The hash covers inputs, not upstream content. A Dockerfile with `FROM node:latest` or unpinned `apt-get install` won't pick up upstream changes on its own. A forced rebuild (`rp recreate --rebuild`) stays available.
 - Old hashes accumulate. Images no container references are removed by `rp gc` (ADR-0025). `rp destroy` no longer removes images, because they are shared.
 - Containers from before this ADR have no `rp.image_hash`. They count as stale, and the warning tells the user that `rp recreate` migrates them (ADR-0025).
