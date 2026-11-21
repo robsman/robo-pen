@@ -31,7 +31,8 @@ agent := shell(justfile_directory() + "/rp-fuse/rp-fuse-darwin-arm64 config --fi
 user := shell("u=$(" + justfile_directory() + "/rp-fuse/rp-fuse-darwin-arm64 config --file " + invocation_directory() + "/.rp/config.yaml field user 2>/dev/null || true); echo ${u:-coder}")
 
 # Container prefix is workspace-agent-specific:
-#   rp-<agent>-<basename>      e.g. rp-claude-code-myrepo, rp-opencode-myrepo
+#   rp-<agent>-<name>      e.g. rp-claude-code-myrepo, rp-opencode-myrepo-feat
+# where <name> comes from the git repo and worktree (ADR-0021).
 prefix := "rp-" + agent + "-"
 
 # Generic prefix used by `list` to filter all rp-managed containers regardless
@@ -409,6 +410,7 @@ _ensure: _service-ensure
             --name "$CONT_NAME" \
             --cap-add SYS_ADMIN \
             -l "rp.host_path=$WS_PRIMARY" \
+            -l "rp.name_explicit=$NAME_EXPLICIT" \
             -l "rp.agent=$AGENT" \
             -l rp.managed=true \
             $CONTAINER_ENV \
@@ -455,7 +457,7 @@ create: _service-ensure
     set -euo pipefail
     eval "$( {{justfile_directory()}}/scripts/resolve-recipe-ctx.sh "{{host_dir}}" )"
     if container list -a -q | grep -qx "$CONT_NAME"; then
-        echo "Container $CONT_NAME already exists. Use 'rp destroy --name $NAME' first."
+        echo "Container $CONT_NAME already exists for $WS_PRIMARY. Use 'rp destroy' first, or --name to create another."
         exit 1
     fi
     IMAGE_TAG=$( RP_SYSTEM_TAG={{image_tag}} {{justfile_directory()}}/scripts/build-project-image.sh "$WS_PRIMARY" "$CONT_NAME" )
@@ -493,6 +495,7 @@ create: _service-ensure
         --name "$CONT_NAME" \
         --cap-add SYS_ADMIN \
         -l "rp.host_path=$WS_PRIMARY" \
+        -l "rp.name_explicit=$NAME_EXPLICIT" \
         -l "rp.agent=$AGENT" \
         -l rp.managed=true \
         $CONTAINER_ENV \

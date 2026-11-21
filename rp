@@ -4,8 +4,9 @@
 # Sandbox-aligned CLI: `rp create [--name N] [PATH[:ro]...] [-- ARGS]`.
 # Multiple PATHs map to independent FUSE-shadowed workspaces (each bound
 # 1:1 host-path-to-container-path). `:ro` suffix marks a workspace
-# read-only. Container name defaults to basename of the first PATH; --name
-# overrides. See ADR-0010 for the workspace + mount model.
+# read-only. The container is found by the canonical first PATH; its name
+# is derived from the git repo and worktree; --name overrides. See ADR-0010
+# for the workspace + mount model, ADR-0021 for identity and naming.
 
 set -euo pipefail
 
@@ -50,7 +51,9 @@ Workspace conventions:
   * PATH defaults to "." (cwd) for create/run.
   * Multiple PATHs become independent FUSE-shadowed workspaces.
   * Append ":ro" to a PATH to mount that workspace read-only.
-  * Container name defaults to basename(first PATH); --name overrides.
+  * The container belongs to the first PATH (or cwd): running rp there
+    again finds it. Its name comes from the git repo and worktree, e.g.
+    proj-feat; --name overrides and allows several containers per PATH.
 
 Run 'rp --recipes' for the full just-recipe list.
 EOF
@@ -92,8 +95,8 @@ esac
 # Recipes that take the new workspace-aware CLI (positional paths +
 # --name + -- ARGS).
 WORKSPACE_RECIPES=(create run)
-# Recipes that operate on an existing container by name (--name optional;
-# defaults to basename(cwd)).
+# Recipes that operate on an existing container (--name optional; defaults
+# to the container bound to cwd).
 NAMED_RECIPES=(shell login destroy start stop restart logs)
 
 recipe="$1"; shift
@@ -112,7 +115,8 @@ if (( ! is_workspace_recipe && ! is_named_recipe )); then
     exec just --justfile "$ROBO_PEN_DIR/Justfile" "$recipe" "$@"
 fi
 
-# Parse the new CLI.
+# Parse the new CLI. Drop stale handoff vars from the caller's environment.
+unset RP_NAME RP_PATHS_RAW RP_LOOKUP_ONLY RP_EXTRA_ARGS_RAW
 name=""
 paths=()
 extras=()
@@ -160,11 +164,13 @@ if (( is_named_recipe )); then
         echo "rp $recipe: no extra args allowed after '--'" >&2
         exit 2
     fi
-    if [[ -z "$name" ]]; then
-        # Default: basename of cwd.
-        name="$(basename "$(pwd -P)")"
+    if [[ -n "$name" ]]; then
+        export RP_NAME="$name"
+    else
+        # Default: the container bound to cwd, looked up by path.
+        export RP_PATHS_RAW="$(pwd -P)"$'\n'
+        export RP_LOOKUP_ONLY=1
     fi
-    export RP_NAME="$name"
     exec just --justfile "$ROBO_PEN_DIR/Justfile" "$recipe"
 fi
 
@@ -185,16 +191,10 @@ for entry in $paths; do
     fi
 done
 
-# Default name = basename of first PATH (with :ro suffix stripped).
-if [[ -z "$name" ]]; then
-    first="${canon_paths[1]}"
-    first="${first%:ro}"
-    name="${first:t}"
-fi
-
-# Hand off to Justfile via env. RP_PATHS_RAW is one entry per line so
-# paths-with-spaces survive intact.
-export RP_NAME="$name"
+# Hand off to Justfile via env. Without --name, resolve-recipe-ctx.sh finds
+# or names the container by the first PATH. RP_PATHS_RAW is one entry per
+# line so paths-with-spaces survive intact.
+[[ -n "$name" ]] && export RP_NAME="$name"
 RP_PATHS_RAW=""
 for entry in $canon_paths; do
     RP_PATHS_RAW="${RP_PATHS_RAW}${entry}"$'\n'

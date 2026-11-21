@@ -74,7 +74,7 @@ rp purge                  # NUCLEAR: destroy all rp containers + remove all rp i
 rp --version              # print rp version (matches the pulled image tag)
 ```
 
-Pass an explicit name as the last argument if you want a different name from the folder basename:
+A container belongs to its folder: running `rp` there again finds it, wherever you named it. The name is derived from the git repo and worktree (`~/proj` → `proj`, worktree `~/proj-feat` → `proj-feat`), with a `-2` suffix if another folder already holds it. Pass `--name` for a different name, or for a second container on the same folder:
 
 ```bash
 rp create --name my-name                       # explicit container name
@@ -366,7 +366,7 @@ See `CLAUDE.md` for the developer-facing summary and `CONTEXT.md` for the vocabu
 ## Tips
 
 - `rp list` shows every container with the host folder it's anchored to. Run this if you forget which container goes with which project.
-- If `rp` complains about a collision when you `cd` into a different folder, it means a container with that basename already exists anchored elsewhere. Use an explicit name or destroy the old one.
+- Moving a folder (`mv`, `git worktree move`) detaches it from its container, because the path is the container's identity. Destroy the old container from `rp list` with `rp destroy --name <name>`.
 - For one-off prompts: `rp run "what does this repo do?"` runs the agent with that prompt and exits.
 - Updating an API key: edit `.env` in the robo-pen repo or export the var in your shell. Existing containers carry the value baked in at create time — `rp destroy && rp run` to pick up a new value.
 
