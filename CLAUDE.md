@@ -61,6 +61,8 @@ rp-fuse/                — Go: FUSE driver, lint, config + profile parsers; tes
 scripts/
   build-project-image.sh — composes the per-project image (rp overlay onto image: ref or .rp/Dockerfile output)
   resolve-create-args.sh — translates .rp/config.yaml + agent profile into `container create` flags
+  resolve-git-dirs.sh   — git stores to bind besides the workspaces, e.g. a worktree's common dir (ADR-0019)
+  lib-identity.sh       — container lookup by path, naming, on-disk keys (ADR-0021)
 agent.profiles/<name>/   — built-in agent profile bundles (claude-code is the only one in v1)
   manifest.yaml         — schema in rp-fuse/profile.go (env, files, entrypoints, instructions_dst)
   install.sh, run.sh, run-gated.sh, login.sh — lifecycle scripts COPYed into the overlay

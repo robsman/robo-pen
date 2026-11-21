@@ -280,14 +280,12 @@ if [ -n "${RP_HOST_ALIASES:-}" ]; then
     fi
 fi
 
-# Per-workspace: unwind → capture fd → tmpfs cover. Build the rp-fuse argv
+# Per mount: unwind → capture fd → tmpfs cover. Build the rp-fuse argv
 # along the way (one `--workspace path=fd[:ro]` per entry).
 FUSE_ARGS=()
 slot=0
-for entry in "${WORKSPACES[@]}"; do
-    parse_entry "$entry"
-    p=$ENTRY_PATH
-    ro=$ENTRY_RO_SUFFIX
+cover_and_register() {
+    local p=$1 ro=$2 fd
 
     [ -d "$p" ] || die "$p does not exist"
 
@@ -303,6 +301,28 @@ for entry in "${WORKSPACES[@]}"; do
 
     FUSE_ARGS+=(--workspace "$p=$fd$ro")
     slot=$((slot + 1))
+}
+
+for entry in "${WORKSPACES[@]}"; do
+    parse_entry "$entry"
+    cover_and_register "$ENTRY_PATH" "$ENTRY_RO_SUFFIX"
+done
+
+# Git stores outside the workspaces, e.g. a worktree's common dir
+# (ADR-0019). RP_GIT_DIRS is a space-separated list of `path[:ro]` entries.
+# They are not workspaces: no .rp/ is required, and rp-fuse finds no
+# .rp/shadow there, so it applies an empty rule set. Read-write entries
+# are plain binds and need nothing here. Read-only entries get the same
+# cover as workspaces, because only rp-fuse enforces :ro (the runtime's
+# -v has no read-only flag).
+for entry in ${RP_GIT_DIRS:-}; do
+    parse_entry "$entry"
+    if [ -z "$ENTRY_RO_SUFFIX" ]; then
+        echo "rp-init: git dir $ENTRY_PATH (read-write bind)" >&2
+        continue
+    fi
+    echo "rp-init: git dir $ENTRY_PATH (read-only, via rp-fuse)" >&2
+    cover_and_register "$ENTRY_PATH" ":ro"
 done
 
 # --- Post-cover phase: failures here sleep (debuggable). ----------------
@@ -418,7 +438,7 @@ if [ "${RP_DEBUG:-}" = "1" ]; then
     echo "rp-init: FUSE debug logging enabled (RP_DEBUG=1)" >&2
 fi
 
-echo "rp-init: launching rp-fuse with ${#WORKSPACES[@]} workspace(s)" >&2
+echo "rp-init: launching rp-fuse with $slot mount(s)" >&2
 exec /usr/local/bin/rp-fuse \
     --shadow "$SHADOW" \
     "${FUSE_ARGS[@]}" \

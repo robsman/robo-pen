@@ -384,6 +384,15 @@ _ensure: _service-ensure
             p=${entry%:ro}
             bind_args+=(-v "$p:$p")
         done
+        # Git stores outside the workspaces, e.g. a worktree's common dir
+        # (ADR-0019). Bound 1:1; rp-init mounts :ro ones through rp-fuse.
+        git_dirs_env=""
+        while IFS= read -r entry; do
+            [ -z "$entry" ] && continue
+            p=${entry%:ro}
+            bind_args+=(-v "$p:$p")
+            git_dirs_env="${git_dirs_env:+$git_dirs_env }$entry"
+        done < <( {{justfile_directory()}}/scripts/resolve-git-dirs.sh "${ws_entries[@]}" )
         # Persistent volumes declared by the agent profile (ADR-0014).
         # mkdirs the host backing dir + emits one TSV line per volume.
         # Forward the (mount\tname) pairs to init.sh via RP_VOLUMES so it
@@ -416,6 +425,7 @@ _ensure: _service-ensure
             $CONTAINER_ENV \
             $CREATE_FLAGS \
             -e "RP_WORKSPACE=$RP_WORKSPACE_ENV" \
+            -e "RP_GIT_DIRS=$git_dirs_env" \
             "${vol_env[@]+${vol_env[@]}}" \
             "${bind_args[@]}" \
             ${extra_args[@]+"${extra_args[@]}"} \
@@ -473,6 +483,15 @@ create: _service-ensure
         p=${entry%:ro}
         bind_args+=(-v "$p:$p")
     done
+    # Git stores outside the workspaces, e.g. a worktree's common dir
+    # (ADR-0019). Bound 1:1; rp-init mounts :ro ones through rp-fuse.
+    git_dirs_env=""
+    while IFS= read -r entry; do
+        [ -z "$entry" ] && continue
+        p=${entry%:ro}
+        bind_args+=(-v "$p:$p")
+        git_dirs_env="${git_dirs_env:+$git_dirs_env }$entry"
+    done < <( {{justfile_directory()}}/scripts/resolve-git-dirs.sh "${ws_entries[@]}" )
     # Persistent volumes (ADR-0014). Same mechanism as _ensure.
     volume_pairs=""
     while IFS=$'\t' read -r host_dir cont_mount vol_name; do
@@ -501,6 +520,7 @@ create: _service-ensure
         $CONTAINER_ENV \
         $CREATE_FLAGS \
         -e "RP_WORKSPACE=$RP_WORKSPACE_ENV" \
+        -e "RP_GIT_DIRS=$git_dirs_env" \
         "${vol_env[@]+${vol_env[@]}}" \
         "${bind_args[@]}" \
         ${extra_args[@]+"${extra_args[@]}"} \
