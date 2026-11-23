@@ -10,6 +10,12 @@ You are running inside an isolated container (Debian trixie). You run as user `c
 - `/workspace/.rp/` — Read-only inside the container (shadow rules, `config.yaml`, agent profiles). Edit it from the host to change the shadow rules; restart the container (`rp stop && rp start`) for the change to take effect.
 - `/home/coder` — Your home directory. Ephemeral — lost when the container is destroyed.
 
+## Git
+
+- In a git worktree, the repository's shared git dir is mounted as well, so `commit`, `branch`, `rebase` and `stash` work normally and show up on the host right away.
+- **Do not run `git worktree` commands** (`prune`, `remove`, `move`, `repair`). The repository's other worktrees are not mounted here and look deleted, so git would unregister them on the host.
+- Git commands that change files under `.rp/` fail, because `.rp/` is read-only. That includes switching to, rebasing onto or resetting to commits whose `.rp/` differs.
+
 ## Installing Extra Packages
 
 ```bash

@@ -377,8 +377,42 @@ volumes:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "claude-home\t.claude" {
+	if got != "claude-home\t.claude\tworkspace" {
 		t.Errorf("volumes accessor = %q", got)
+	}
+}
+
+func TestProfileManifest_VolumeScope(t *testing.T) {
+	m, err := parseProfileManifestBytes([]byte(`name: foo
+volumes:
+  - name: home
+    mount: .claude
+    scope: workspace
+  - name: memory
+    mount: .claude-memory
+    scope: repo
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := profileManifestField(m, "volumes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "home\t.claude\tworkspace\nmemory\t.claude-memory\trepo"; got != want {
+		t.Errorf("volumes accessor = %q, want %q", got, want)
+	}
+}
+
+func TestProfileManifest_VolumeRejectUnknownScope(t *testing.T) {
+	_, err := parseProfileManifestBytes([]byte(`name: foo
+volumes:
+  - name: home
+    mount: .claude
+    scope: container
+`))
+	if err == nil || !strings.Contains(err.Error(), "scope") {
+		t.Errorf("expected scope error, got %v", err)
 	}
 }
 

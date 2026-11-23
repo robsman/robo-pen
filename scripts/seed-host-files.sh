@@ -6,7 +6,7 @@
 # fallback path). See ADR-0015.
 #
 # Usage:
-#   scripts/seed-host-files.sh <workspace-dir> <agent-name> <container-name> <container-user>
+#   scripts/seed-host-files.sh <workspace-dir> <agent-name> <container-name> <container-user> <workspace-key> <repo-key>
 #
 # Two manifest sections drive this:
 #   - host_files: [{src, dst, if_missing}]
@@ -20,17 +20,17 @@
 # into the image filesystem layer, NOT through any bind mounts. A volume
 # mount at /home/<user>/.claude/ would shadow whatever cp put under it.
 # So for any dst inside a persistent volume's mount path we MUST write
-# directly to the host backing dir at
-# $RP_VOLUMES_DIR/<container>/<volume>/<rel-inside-volume>. The volume
-# bind reflects those files into the container.
+# directly to the volume's host backing dir (resolve-volumes.sh, ADR-0024)
+# at <backing-dir>/<rel-inside-volume>. The volume bind reflects those
+# files into the container.
 #
 # Missing host sources: if_missing=skip (default) → INFO log + continue;
 # if_missing=error → exit 1.
 
 set -euo pipefail
 
-if [ "$#" -ne 4 ]; then
-    echo "usage: seed-host-files.sh <workspace-dir> <agent-name> <container-name> <container-user>" >&2
+if [ "$#" -ne 6 ]; then
+    echo "usage: seed-host-files.sh <workspace-dir> <agent-name> <container-name> <container-user> <workspace-key> <repo-key>" >&2
     exit 2
 fi
 
@@ -38,6 +38,8 @@ WORKSPACE=$1
 AGENT=$2
 CONT_NAME=$3
 RP_USER=$4
+WORKSPACE_KEY=$5
+REPO_KEY=$6
 
 REPO_DIR=$(cd "$(dirname "$0")/.." && pwd)
 RP_FUSE="$REPO_DIR/rp-fuse/rp-fuse-darwin-arm64"
@@ -46,15 +48,11 @@ if [ ! -x "$RP_FUSE" ]; then
     exit 0
 fi
 
-VOLUMES_DIR=${RP_VOLUMES_DIR:-$HOME/.local/share/robo-pen/volumes}
-
 # Build a volume mount → host-backing lookup. Each line: "<mount>\t<host_dir>".
 VOLUME_MAP=$(
-    "$RP_FUSE" profile --workspace "$WORKSPACE" --repo-dir "$REPO_DIR" --agent "$AGENT" \
-        field volumes 2>/dev/null \
-        | while IFS=$'\t' read -r vol_name vol_mount; do
-            [ -z "$vol_name" ] && continue
-            printf '/home/%s/%s\t%s\n' "$RP_USER" "$vol_mount" "$VOLUMES_DIR/$CONT_NAME/$vol_name"
+    "$REPO_DIR/scripts/resolve-volumes.sh" "$WORKSPACE" "$AGENT" "$WORKSPACE_KEY" "$REPO_KEY" "$RP_USER" \
+        | while IFS=$'\t' read -r host_dir cont_mount _; do
+            printf '%s\t%s\n' "$cont_mount" "$host_dir"
         done
 )
 
@@ -143,9 +141,7 @@ write_dst() {
 {
     "$RP_FUSE" profile --workspace "$WORKSPACE" --repo-dir "$REPO_DIR" --agent "$AGENT" \
         field host_files 2>/dev/null || true
-    if [ -f "$WORKSPACE/.rp/config.yaml" ]; then
-        "$RP_FUSE" config --file "$WORKSPACE/.rp/config.yaml" field host_files 2>/dev/null || true
-    fi
+    "$RP_FUSE" config --file "$WORKSPACE/.rp/config.yaml" field host_files 2>/dev/null || true
 } | while IFS=$'\t' read -r src dst if_missing; do
         [ -z "$src" ] && continue
         host_src=$(expand_tilde "$src")
@@ -167,9 +163,7 @@ write_dst() {
 {
     "$RP_FUSE" profile --workspace "$WORKSPACE" --repo-dir "$REPO_DIR" --agent "$AGENT" \
         field host_keychain 2>/dev/null || true
-    if [ -f "$WORKSPACE/.rp/config.yaml" ]; then
-        "$RP_FUSE" config --file "$WORKSPACE/.rp/config.yaml" field host_keychain 2>/dev/null || true
-    fi
+    "$RP_FUSE" config --file "$WORKSPACE/.rp/config.yaml" field host_keychain 2>/dev/null || true
 } | while IFS=$'\t' read -r service dst mode if_missing; do
         [ -z "$service" ] && continue
         expanded_dst=$(expand_user_template "$dst")

@@ -4,17 +4,28 @@ env: [ANTHROPIC_API_KEY]
 files:
   - src: settings/settings.json
     dst: /home/{{user}}/.claude/settings.json
+  # Managed settings (highest precedence; a host settings.json copied in
+  # by host_files can't override them). Points auto-memory at the
+  # claude-memory volume below (ADR-0024).
+  - src: settings/managed-settings.json
+    dst: /etc/claude-code/managed-settings.json
 instructions_dst: /home/{{user}}/.claude/CLAUDE.md
-# Persistent volume — survives `rp destroy && rp create` so `claude login`
-# writes (~/.claude/.credentials.json, session state, indexes) are
+# Persistent volumes (ADR-0014, ADR-0024).
+# claude-home: per workspace, survives `rp recreate` so `claude login`
+# writes (~/.claude/.credentials.json, session state, history) are
 # preserved. The volume mount shadows the in-image /home/{{user}}/.claude
 # at runtime, so build-project-image.sh routes the `files:` + the
 # composed instructions_dst into /usr/local/share/rp/seed/claude-home/
 # instead; rp-init.sh copies them into the mounted volume on first
-# launch (volume is empty on first create). See ADR-0014.
+# launch (volume is empty on first create).
+# claude-memory: auto-memory, per repository like Claude Code's own
+# (shared by all worktree containers of a repo, kept across destroy).
 volumes:
   - name: claude-home
     mount: .claude
+  - name: claude-memory
+    mount: .claude-memory
+    scope: repo
 # host_files + host_keychain intentionally NOT declared at the profile
 # level. Host imports are opt-in per workspace via .rp/config.yaml
 # (see .rp.example/config.yaml for the menu of recommended candidates).

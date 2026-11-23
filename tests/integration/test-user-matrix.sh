@@ -22,6 +22,9 @@ run_case() {
     local ws=$(mk_probe "$slug")
     (cd "$ws" && "$RP" init >/dev/null)
     eval "$body" > "$ws/.rp/config.yaml"
+    # Register before creating so a failing case still gets cleaned up.
+    # All matrix cases use the default agent (claude-code).
+    remember_container "$(container_name claude-code "$slug")"
     (
         cd "$ws"
         set +e
@@ -36,9 +39,6 @@ run_case() {
             fail "[$label] rp create unexpectedly succeeded; expected failure (priv user)"
         fi
     )
-    # Register the container name so cleanup gets it. All matrix cases use
-    # the default agent (claude-code), so name is rp-claude-code-<slug>.
-    remember_container "$(container_name claude-code "$slug")"
 }
 
 # Case 1: defaults — should pass.

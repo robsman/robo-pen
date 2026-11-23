@@ -23,7 +23,7 @@ A host directory exposed inside the container as a FUSE-shadowed view (passthrou
 _Avoid_: host workspace, project directory (those name the host-side dir, not the container view).
 
 **Primary workspace**:
-The first workspace in a container's workspace list. Drives image-build inputs (`.rp/config.yaml` for agent / user / resources), the default container name (basename), and the `rp.host_path` label used by the collision check on re-attach. Additional workspaces are equal partners at the FUSE level but invisible to image-build resolution.
+The first workspace in a container's workspace list. Drives image-build inputs (`.rp/config.yaml` for agent / user / resources), the default container name (repo + worktree, ADR-0021), and the `rp.host_path` label that identifies the container: rp finds a container by this path, not by name. Additional workspaces are equal partners at the FUSE level but invisible to image-build resolution.
 _Avoid_: main workspace, root workspace.
 
 **Read-only workspace**:
@@ -31,8 +31,11 @@ A workspace mounted with `:ro` (e.g. `rp create . /Users/me/docs:ro`). The FUSE 
 _Avoid_: read-only mount (too generic), frozen workspace.
 
 **Shadow rules**:
-The pattern set in `.rp/shadow` that determines which paths are shadowed. Syntax follows `.gitignore`: leading `/` and mid-slash anchor to root, `*` / `**` / `?` / `[…]` globs, trailing `/` for directory-only, `!`-prefix for negation (re-expose a path; last-match-wins). The container sees the file but cannot modify it (writes return EROFS); only the host can edit the rules. The same applies to the whole `.rp/` tree, including renaming or removing `.rp` itself. To re-expose a subtree under a shadowed parent, use per-child patterns (`dir/*` + `dir/**/*` + `!dir/sub` + `!dir/sub/**`) — `dir/**` alone also matches `dir` itself, which would prevent the FUSE Lookup from drilling into the re-exposed subtree.
+The pattern set in `.rp/shadow` that determines which paths are shadowed. Syntax follows `.gitignore`: leading `/` and mid-slash anchor to root, `*` / `**` / `?` / `[…]` globs, trailing `/` for directory-only, `!`-prefix for negation (re-expose a path; last-match-wins). The container sees the file but cannot modify it (writes return EROFS); only the host can edit the rules. The same applies to the whole `.rp/` tree, including renaming or removing `.rp` itself. To re-expose a subtree under a shadowed parent, use per-child patterns (`dir/*` + `dir/**/*` + `!dir/sub` + `!dir/sub/**`) — `dir/**` alone also matches `dir` itself, which would prevent the FUSE Lookup from drilling into the re-exposed subtree. A linked worktree without a `.rp/` of its own (the repo doesn't commit it) uses the repo home's rules, captured at create and passed in as `RP_SHADOW_FALLBACK`; the container can't create a `.rp/` to switch them off (ADR-0023).
 _Avoid_: ignore patterns, ccrignore rules.
+
+**Rp dir**:
+The `.rp/` directory that applies to a workspace: its own when it exists, else, for a linked worktree, the repo home's (`rp-fuse rpdir <workspace>`). Taken as a whole, never mixed: config, shadow rules, Dockerfile, instructions and agent overrides all come from it. The repo home's `config.local.yaml` is layered on top either way (ADR-0023).
 
 ### Image layers
 
@@ -41,7 +44,7 @@ The shared `rp-system` image, built once per robo-pen release via `rp build-base
 _Avoid_: robo-pen image, root image.
 
 **Project image**:
-The image actually run by a given container. Composed per workspace from the user's chosen base (either `image:` in `.rp/config.yaml`, `build:` from `.rp/Dockerfile`, or the default `rp-default`) plus the rp overlay layer. Tagged `<container-name>:latest-rp`.
+The image actually run by a given container. Composed per workspace from the user's chosen base (either `image:` in `.rp/config.yaml`, `build:` from `.rp/Dockerfile`, or the default `rp-default`) plus the rp overlay layer. Content-addressed: tagged `rp-img-<agent>-<hash12>:latest-rp` from a hash of its inputs, and shared by every container with the same inputs (ADR-0022).
 _Avoid_: container image, per-repo image.
 
 **rp overlay**:
@@ -49,11 +52,11 @@ The thin layer always applied on top of a user's chosen image. Validates (or cre
 _Avoid_: rp layer, decorator layer.
 
 **Persistent volume**:
-A directory inside the container that survives `rp destroy && rp create`. Declared in a profile manifest's `volumes:` block as `{name, mount}`; `mount` is relative to the container user's home. Host backing lives at `$RP_VOLUMES_DIR/<container-name>/<volume-name>/` (default `~/.local/share/robo-pen/volumes`). Used for state the agent writes during a session that should carry over: login tokens, history files, agent-local caches. The first `rp create` seeds an empty volume from `/usr/local/share/rp/seed/<name>/` (the build routes profile `files:` whose `dst` falls inside a volume mount into the seed instead of the mount, so defaults survive being shadowed by the bind). `rp purge` wipes the volume root. See ADR-0014.
+A directory inside the container that outlives the container. Declared in a profile manifest's `volumes:` block as `{name, mount, scope}`; `mount` is relative to the container user's home. `scope: workspace` (the default) backs it at `$RP_VOLUMES_DIR/workspaces/<workspace-key>/<volume-name>/` (default `~/.local/share/robo-pen/volumes`), kept across `rp recreate`. `scope: repo` backs it at `$RP_VOLUMES_DIR/repos/<repo-key>/<volume-name>/`, shared by every container whose primary workspace belongs to the repo; outside git it falls back to workspace scope. Each key dir records its workspace path (`.workspace`) or git common dir (`.repo`). Used for state the agent writes during a session that should carry over: login tokens, history files, auto-memory (claude-code's repo-scoped `claude-memory`, wired up through `autoMemoryDirectory` in managed settings). The first `rp create` seeds an empty volume from `/usr/local/share/rp/seed/<name>/` (the build routes profile `files:` whose `dst` falls inside a volume mount into the seed instead of the mount, so defaults survive being shadowed by the bind). `rp destroy` removes the container's workspace volumes; repo volumes are removed only by `rp gc --memory` once the repo is gone. Volumes of containers from before ADR-0024 (`$RP_VOLUMES_DIR/<container-name>/`) move to the workspace key on `rp recreate`. `rp purge` wipes the volume root. See ADR-0014, ADR-0024, ADR-0025.
 _Avoid_: named volume (overloaded by container runtimes), home volume (overspecific).
 
 **Host file import**:
-A file or directory copied from the host into the container at `rp create` time. Declared in `.rp/config.yaml` (`host_files:` block) OR in a profile manifest's `host_files:`. Both sources merge at create time; default in built-in profiles is empty so nothing crosses the host boundary by accident. `src` is a host path (`~` expands to host's `$HOME`); `dst` is an absolute in-container path. Volume-backed dsts write directly to the host volume backing dir; non-volume dsts go through `container cp` into the container's writable layer. Missing host sources skip silently (default) or fail with `if_missing: error`. Re-applied on every `rp create`; agent writes to volume paths NOT in `host_files` persist across destroy+create. See ADR-0015.
+A file or directory copied from the host into the container at `rp create` time. Declared in `.rp/config.yaml` (`host_files:` block) OR in a profile manifest's `host_files:`. Both sources merge at create time; default in built-in profiles is empty so nothing crosses the host boundary by accident. `src` is a host path (`~` expands to host's `$HOME`); `dst` is an absolute in-container path. Volume-backed dsts write directly to the host volume backing dir; non-volume dsts go through `container cp` into the container's writable layer. Missing host sources skip silently (default) or fail with `if_missing: error`. Re-applied on every `rp create`; agent writes to volume paths NOT in `host_files` persist across `rp recreate`. See ADR-0015.
 _Avoid_: host bind (already a workspace term), seed file (overloaded with the volume-seed mechanism in ADR-0014).
 
 **Host keychain import**:

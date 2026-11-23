@@ -28,7 +28,7 @@ RP_FUSE="$REPO_DIR/rp-fuse/rp-fuse-darwin-arm64"
 CREATE_FLAGS=""
 CONTAINER_ENV=""
 
-if [ -x "$RP_FUSE" ] && [ -f "$CONFIG" ]; then
+if [ -x "$RP_FUSE" ]; then
     mem=$("$RP_FUSE" config --file "$CONFIG" field resources.memory 2>/dev/null || true)
     if [ -n "$mem" ]; then
         CREATE_FLAGS="$CREATE_FLAGS --memory $mem"

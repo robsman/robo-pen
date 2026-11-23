@@ -16,6 +16,20 @@ if ! container system status 2>/dev/null | grep -qi "running"; then
     exit 1
 fi
 
+# Second line of defence behind each test's own trap: every container a
+# test registers is also written to a suite-wide ledger, and all probe dirs
+# live under one suite dir. Both are swept on exit, including Ctrl-C and
+# tests that were killed before their trap could run.
+. "$THIS/lib-sweep.sh"
+export RP_TEST_TMP=$(mktemp -d /tmp/rp-integration-suite.XXXXXX)
+export RP_TEST_LEDGER="$RP_TEST_TMP/containers"
+: > "$RP_TEST_LEDGER"
+# Outside RP_TEST_TMP, which sweep_suite deletes before reading it.
+images_before=$(mktemp)
+project_images > "$images_before"
+trap 'sweep_suite "$RP_TEST_LEDGER" "$RP_TEST_TMP" "$images_before"; rm -f "$images_before"' EXIT
+trap "exit 130" INT TERM HUP
+
 failed=0
 passed=0
 for t in "$THIS"/test-*.sh; do

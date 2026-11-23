@@ -10,13 +10,35 @@ set -euo pipefail
 
 REPO_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 RP="$REPO_DIR/rp"
+. "$REPO_DIR/tests/integration/lib-sweep.sh"
 
 # Probe state goes in /tmp so the host workspace doesn't get polluted.
-TMPROOT=$(mktemp -d /tmp/rp-integration.XXXXXX)
+# run-all.sh sets RP_TEST_TMP so it can sweep dirs of tests that died hard.
+TMPROOT=$(mktemp -d "${RP_TEST_TMP:-/tmp}/rp-integration.XXXXXX")
+# Volumes live under TMPROOT, so removing it also removes them instead of
+# leaving one dir per probe in ~/.local/share/robo-pen/volumes.
+export RP_VOLUMES_DIR="$TMPROOT/volumes"
+export RP_LOCK_DIR="$TMPROOT/locks"
+# Project images are shared and named by content hash (ADR-0022), so a test
+# can't know its image names up front: remove the ones created meanwhile.
+project_images > "$TMPROOT/images-before"
 trap "cleanup_probes" EXIT
+# Route signals through the EXIT trap so an interrupted test still cleans up.
+trap "exit 130" INT TERM HUP
 
-PROBE_CONTAINERS=()
+# Registered containers go to a file, not an array: rp_create_and_start runs
+# inside $(...), and an array appended to in that subshell never reaches
+# the EXIT trap in the parent.
+PROBE_CONTAINERS_FILE="$TMPROOT/containers"
 PROBE_WORKSPACES=()
+EXTRA_CLEANUP=()
+
+# Usage: on_cleanup <command>
+# Registers an extra cleanup command. Tests must use this instead of their
+# own `trap ... EXIT`, which would replace cleanup_probes.
+on_cleanup() {
+    EXTRA_CLEANUP+=("$1")
+}
 
 mk_probe() {
     # Usage: mk_probe <slug>          -> echoes the probe workspace dir.
@@ -32,8 +54,22 @@ mk_probe() {
     echo "$ws"
 }
 
+# Register a container (and its image) for cleanup. Call it BEFORE
+# `rp create`, so a create that fails halfway still gets cleaned up.
 remember_container() {
-    PROBE_CONTAINERS+=("$1")
+    echo "$1" >> "$PROBE_CONTAINERS_FILE"
+    # Suite-wide ledger, swept by run-all.sh as a second line of defence.
+    if [ -n "${RP_TEST_LEDGER:-}" ]; then
+        echo "$1" >> "$RP_TEST_LEDGER"
+    fi
+}
+
+# Usage: remove_probe_container <container>
+remove_probe_container() {
+    # --force lets delete kill a running container in one step. Without
+    # it, `container delete` refuses on running containers and the next
+    # test sees leftover state.
+    container delete --force "$1" >/dev/null 2>&1 || true
 }
 
 # Usage: rp_create_and_start <slug>
@@ -48,25 +84,23 @@ rp_create_and_start() {
     cont=$(container_name "$agent" "$slug")
     # Recover from prior failed runs that left state behind.
     container delete --force "$cont" >/dev/null 2>&1 || true
-    container image rm -f "$cont:latest-rp" >/dev/null 2>&1 || true
-    "$RP" create --name "$slug" >/dev/null 2>&1 || fail "rp create --name $slug failed"
     remember_container "$cont"
+    "$RP" create --name "$slug" >/dev/null 2>&1 || fail "rp create --name $slug failed"
     container start "$cont" >/dev/null 2>&1 || fail "container start $cont failed"
     echo "$cont"
 }
 
 cleanup_probes() {
     local c
-    for c in "${PROBE_CONTAINERS[@]:-}"; do
+    if [ -f "$PROBE_CONTAINERS_FILE" ]; then
+        for c in $(sort -u "$PROBE_CONTAINERS_FILE"); do
+            remove_probe_container "$c"
+        done
+    fi
+    remove_new_images "$TMPROOT/images-before"
+    for c in "${EXTRA_CLEANUP[@]:-}"; do
         [ -z "$c" ] && continue
-        # --force lets delete kill a running container in one step. Without
-        # it, `container delete` refuses on running containers and the next
-        # test sees leftover state.
-        container delete --force "$c" >/dev/null 2>&1 || true
-        # Also remove the per-test image tag (rp-<agent>-<slug>:latest-rp);
-        # otherwise images accumulate across `just test-integration` runs
-        # until the disk fills.
-        container image rm -f "$c:latest-rp" >/dev/null 2>&1 || true
+        eval "$c" || true
     done
     rm -rf "$TMPROOT"
 }

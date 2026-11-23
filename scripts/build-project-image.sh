@@ -5,6 +5,16 @@
 # user's chosen base image plus a rp overlay (ADR-0006) plus the configured
 # agent profile bundle's install step and instruction compose (ADR-0007).
 #
+# Images are content-addressed (ADR-0022): the tag is
+# rp-img-<agent>-<hash12>:latest-rp, where the hash covers the generated
+# overlay Dockerfile and context (which encode the resolved config, agent
+# profile, instructions, rp-system tag and this generator), plus the
+# identity of the base image. An existing image with that tag is reused
+# without building, so worktrees with the same .rp/ share one image.
+#
+#   --hash-only   print the hash and exit, without building (staleness check)
+#   RP_REBUILD=1  rebuild even if the image exists, without the build cache
+#
 # Image source (one of):
 #   * image: <ref>     -> overlay on top of the upstream image
 #   * build: <...>     -> first build user's Dockerfile, then overlay
@@ -27,13 +37,17 @@
 
 set -euo pipefail
 
-if [ "$#" -ne 2 ]; then
-    echo "usage: build-project-image.sh <workspace-dir> <container-name>" >&2
+HASH_ONLY=0
+if [ "${1:-}" = "--hash-only" ]; then
+    HASH_ONLY=1
+    shift
+fi
+if [ "$#" -ne 1 ]; then
+    echo "usage: build-project-image.sh [--hash-only] <workspace-dir>" >&2
     exit 2
 fi
 
 WORKSPACE=$1
-CONT_NAME=$2
 
 # Tag of the rp-system image the overlay COPYs its runtime bits (rp-fuse,
 # rp-init.sh, tini, …) from. The Justfile pins this to the same
@@ -51,8 +65,12 @@ if [ ! -x "$RP_FUSE" ]; then
     exit 1
 fi
 
+# The .rp/ dir that applies: the workspace's own, or for a worktree
+# without one, the repo home's (ADR-0023). rp-fuse resolves the config
+# layers from the workspace path itself.
+RP_DIR=$("$RP_FUSE" rpdir "$WORKSPACE")
 CONFIG="$WORKSPACE/.rp/config.yaml"
-DEFAULT_DOCKERFILE="$WORKSPACE/.rp/Dockerfile"
+DEFAULT_DOCKERFILE="$RP_DIR/Dockerfile"
 
 # Resolve agent + user from .rp/config.yaml (or defaults).
 AGENT=$("$RP_FUSE" config --file "$CONFIG" field agent 2>/dev/null || echo "claude-code")
@@ -72,30 +90,55 @@ if [ "$SOURCE" = "default" ] && [ -f "$DEFAULT_DOCKERFILE" ]; then
     SOURCE="dockerfile_default"
 fi
 
-TAG="$CONT_NAME:latest-rp"
+# Usage: hash_tree <dir> — one hash over every file's path, mode and content.
+hash_tree() {
+    (
+        cd "$1"
+        find . -type f ! -path './.git/*' | LC_ALL=C sort | while IFS= read -r f; do
+            printf '%s %s ' "$f" "$(stat -f %Lp "$f")"
+            shasum -a 256 <"$f"
+        done
+    ) | shasum -a 256 | cut -c1-64
+}
 
-# Step 1: produce the SOURCE_REF — the image used as the FROM line in the overlay.
+# Usage: image_digest <ref> — local image digest, empty if not present.
+image_digest() {
+    container image inspect "$1" 2>/dev/null | jq -r '.[0].id // empty' 2>/dev/null || true
+}
+
+# Step 1: resolve the SOURCE_REF — the image used as the FROM line in the
+# overlay. Images built from a user Dockerfile are content-addressed too
+# (rp-src-<hash12>), so the overlay's FROM line and hash stay stable.
+# SOURCE_ID adds what the ref string alone doesn't pin: the digest of
+# locally built bases, whose tag stays the same across rebuilds.
+SOURCE_BUILD=()
 case "$SOURCE" in
     image)
         SOURCE_REF=$("$RP_FUSE" config --file "$CONFIG" field image)
+        SOURCE_ID=""
         echo "build-project-image: source=image ref=$SOURCE_REF" >&2
         ;;
     build)
         CTX_REL=$("$RP_FUSE" config --file "$CONFIG" field context)
         DF_REL=$("$RP_FUSE" config --file "$CONFIG" field dockerfile)
-        CONTEXT=$(cd "$WORKSPACE/.rp/$CTX_REL" && pwd)
+        CONTEXT=$(cd "$RP_DIR/$CTX_REL" && pwd)
         DOCKERFILE="$CONTEXT/$DF_REL"
-        SOURCE_REF="$CONT_NAME:user"
+        src_hash=$( { shasum -a 256 <"$DOCKERFILE"; hash_tree "$CONTEXT"; } | shasum -a 256 | cut -c1-12)
+        SOURCE_REF="rp-src-$src_hash:latest"
+        SOURCE_ID=""
+        SOURCE_BUILD=(-f "$DOCKERFILE" "$CONTEXT")
         echo "build-project-image: source=build dockerfile=$DOCKERFILE context=$CONTEXT" >&2
-        container build -t "$SOURCE_REF" -f "$DOCKERFILE" "$CONTEXT" >&2
         ;;
     dockerfile_default)
-        SOURCE_REF="$CONT_NAME:user"
+        src_hash=$( { shasum -a 256 <"$DEFAULT_DOCKERFILE"; hash_tree "$RP_DIR"; } | shasum -a 256 | cut -c1-12)
+        SOURCE_REF="rp-src-$src_hash:latest"
+        SOURCE_ID=""
+        SOURCE_BUILD=(-f "$DEFAULT_DOCKERFILE" "$RP_DIR")
         echo "build-project-image: source=.rp/Dockerfile" >&2
-        container build -t "$SOURCE_REF" -f "$DEFAULT_DOCKERFILE" "$WORKSPACE/.rp" >&2
         ;;
     default)
         SOURCE_REF="rp-default"
+        SOURCE_ID=$(image_digest rp-default)
         echo "build-project-image: source=default (rp-default)" >&2
         ;;
     *)
@@ -104,72 +147,17 @@ case "$SOURCE" in
         ;;
 esac
 
-# Step 1.5: refuse non-Debian/Ubuntu bases up front. The overlay installs
-# fuse3 via apt; Alpine, RHEL, Arch, distroless etc. are not supported in v1.
-# Pull explicitly when the image is not already local — separates pull
-# failures (manifest missing, network error, arch mismatch) from Debian-
-# probe misses. Skip pull for locally-built images (rp-default,
-# images we just built in this script's earlier `build` branch).
-# `container image inspect` returns 0 iff the image exists locally.
-if ! container image inspect "$SOURCE_REF" >/dev/null 2>&1; then
-    if ! pull_err=$(container image pull "$SOURCE_REF" 2>&1); then
-        cat >&2 <<MSG
-build-project-image: failed to pull base image '$SOURCE_REF':
-
-$pull_err
-
-Common causes: image tag does not exist, no arm64 manifest in the manifest
-list, network unreachable, or the registry requires authentication.
-MSG
-        exit 1
-    fi
-fi
-
-# Probe for /etc/debian_version (Debian + Debian-derived like Ubuntu set it).
-# Use apt-get as a secondary signal — some Ubuntu spins drop the file but
-# always have apt-get. Surface stderr from the probe container so a runtime
-# crash (entrypoint issue, libc mismatch, arch mismatch) reads as such
-# instead of masquerading as "wrong distro". Wrap in `if !` so set -e
-# doesn't kill us on the expected failure paths.
-if ! probe_err=$(container run --rm --entrypoint=/bin/sh "$SOURCE_REF" -c '
-    [ -f /etc/debian_version ] && exit 0
-    command -v apt-get >/dev/null 2>&1 && exit 0
-    echo "neither /etc/debian_version nor apt-get found" >&2
-    exit 1
-' 2>&1); then
-    if grep -q 'platform linux/arm64' <<<"$probe_err"; then
-        cat >&2 <<MSG
-build-project-image: base image '$SOURCE_REF' has no linux/arm64 manifest.
-
-$probe_err
-
-Apple Container runs natively on arm64 (Apple Silicon) and does not emulate
-amd64-only images. Pick a base that publishes an arm64 manifest list — most
-official images do (debian, ubuntu, node:*-trixie, python:*-slim-trixie,
-mcr.microsoft.com/devcontainers/javascript-node, etc.). The mcr.microsoft.com
-/devcontainers/universal image is amd64-only at the time of writing.
-MSG
-    else
-        cat >&2 <<MSG
-build-project-image: base image '$SOURCE_REF' rejected:
-
-$probe_err
-
-rp's v1 overlay installs fuse3 via apt-get. Alpine, RHEL, Arch, distroless,
-etc. bases are not supported yet. Use a Debian-based image
-(debian:trixie-slim, ubuntu:24.04, node:*-trixie, python:*-slim-trixie).
-
-See docs/adr/0006-per-project-images-with-rp-overlay.md for the restriction
-and the path to widening it.
-MSG
-    fi
-    exit 1
-fi
-
 # Step 2: assemble the overlay build context.
 OVERLAY_CTX=$(mktemp -d)
 OVERLAY_DOCKERFILE="$OVERLAY_CTX/Dockerfile"
-trap "rm -rf $OVERLAY_CTX" EXIT
+LOCK=""
+cleanup() {
+    rm -rf "$OVERLAY_CTX"
+    if [ -n "$LOCK" ]; then
+        rm -rf "$LOCK"
+    fi
+}
+trap cleanup EXIT
 
 # Profile assets that COPY needs to find under the overlay context.
 mkdir -p "$OVERLAY_CTX/agent"
@@ -197,8 +185,8 @@ while IFS=$'\t' read -r src dst; do
 done <<<"$FILES_LINES"
 
 # Optional workspace-level instruction fragment.
-if [ -f "$WORKSPACE/.rp/instructions.md" ]; then
-    cp "$WORKSPACE/.rp/instructions.md" "$OVERLAY_CTX/agent/workspace-instructions.md"
+if [ -f "$RP_DIR/instructions.md" ]; then
+    cp "$RP_DIR/instructions.md" "$OVERLAY_CTX/agent/workspace-instructions.md"
 fi
 
 INSTRUCTIONS_DST=$("$RP_FUSE" profile --workspace "$WORKSPACE" --repo-dir "$REPO_DIR" --agent "$AGENT" field instructions_dst || true)
@@ -231,7 +219,7 @@ volume_seed_target() {
         *) return 0 ;;  # outside any volume's possible mount root
     esac
     local rel_to_home=${expanded_dst#"$home_prefix"}
-    while IFS=$'\t' read -r vol_name vol_mount; do
+    while IFS=$'\t' read -r vol_name vol_mount _; do
         [ -z "$vol_name" ] && continue
         # Match if rel_to_home equals vol_mount or starts with vol_mount/.
         if [ "$rel_to_home" = "$vol_mount" ] || [ "${rel_to_home#"$vol_mount"/}" != "$rel_to_home" ]; then
@@ -319,6 +307,16 @@ EOF
 fi
 
 cat <<EOF
+# git over FUSE-shadowed workspaces (ADR-0020). Appended to /etc/gitconfig
+# rather than set via \`git config\`, so it also applies when git is only
+# installed later by the profile's install.sh, and keeps base-image settings.
+#   safe.directory=*         workspace roots read as root-owned through rp-fuse
+#   core.checkStat=minimal   inode/dev/uid/gid never match across the bind
+#   gc.worktreePruneExpire   other worktrees aren't mounted here (ADR-0019)
+# GIT_OPTIONAL_LOCKS=0 keeps \`git status\` from rewriting the shared index.
+RUN printf '[safe]\\n\\tdirectory = *\\n[core]\\n\\tcheckStat = minimal\\n[gc]\\n\\tworktreePruneExpire = never\\n' >> /etc/gitconfig
+ENV GIT_OPTIONAL_LOCKS=0
+
 # Mount points for the shadow boundary + agent entrypoint dir. No
 # fixed workspace path: with 1:1 binds, the workspace is the host path
 # (see ADR-0010 workspace-discovery section).
@@ -362,7 +360,9 @@ done
 # inside a declared volume's mount path, redirect to the seed location
 # under /usr/local/share/rp/seed/<volume>/<rel>; rp-init.sh seeds the
 # volume from there on first launch. Files outside any volume go
-# straight to their absolute in-container path as before.
+# straight to their absolute in-container path: owned by the container
+# user inside its home, root-owned and read-only elsewhere (e.g. Claude
+# Code's managed settings under /etc, which the agent must not edit).
 while IFS=$'\t' read -r src dst; do
     [ -z "$src" ] && continue
     expanded_dst=$(expand_user_template "$dst")
@@ -374,10 +374,13 @@ while IFS=$'\t' read -r src dst; do
         printf '# files[].dst routed to seed for volume %s\n' "$vol_name"
         printf 'RUN mkdir -p %s\n' "$parent_dir"
         printf 'COPY agent/files/%s %s\n' "$src" "$seed_path"
-    else
+    elif [ "${expanded_dst#/home/$RP_USER/}" != "$expanded_dst" ]; then
         parent_dir=$(dirname "$expanded_dst")
         printf 'RUN mkdir -p %s && chown %s:%s %s\n' "$parent_dir" "$RP_USER" "$RP_USER" "$parent_dir"
         printf 'COPY --chown=%s:%s agent/files/%s %s\n' "$RP_USER" "$RP_USER" "$src" "$expanded_dst"
+    else
+        printf 'RUN mkdir -p %s\n' "$(dirname "$expanded_dst")"
+        printf 'COPY --chown=0:0 --chmod=0644 agent/files/%s %s\n' "$src" "$expanded_dst"
     fi
 done <<<"$FILES_LINES"
 
@@ -407,27 +410,26 @@ EOF
 PLUGIN_MARKETPLACES=$("$RP_FUSE" profile --workspace "$WORKSPACE" --repo-dir "$REPO_DIR" --agent "$AGENT" field plugins.marketplaces 2>/dev/null || true)
 PLUGIN_INSTALL=$("$RP_FUSE" profile --workspace "$WORKSPACE" --repo-dir "$REPO_DIR" --agent "$AGENT" field plugins.install 2>/dev/null || true)
 
-# Workspace-level additions (.rp/config.yaml). Appended to whatever the
-# profile already declared, in order. Lets users add personal plugins
-# without overriding the entire profile bundle. See ADR-0016.
-if [ -f "$WORKSPACE/.rp/config.yaml" ]; then
-    cfg_marketplaces=$("$RP_FUSE" config --file "$WORKSPACE/.rp/config.yaml" field plugins.marketplaces 2>/dev/null || true)
-    cfg_install=$("$RP_FUSE" config --file "$WORKSPACE/.rp/config.yaml" field plugins.install 2>/dev/null || true)
-    if [ -n "$cfg_marketplaces" ]; then
-        if [ -n "$PLUGIN_MARKETPLACES" ]; then
-            PLUGIN_MARKETPLACES="$PLUGIN_MARKETPLACES
+# Workspace-level additions (.rp/config.yaml and its local layers).
+# Appended to whatever the profile already declared, in order. Lets users
+# add personal plugins without overriding the entire profile bundle. See
+# ADR-0016.
+cfg_marketplaces=$("$RP_FUSE" config --file "$CONFIG" field plugins.marketplaces 2>/dev/null || true)
+cfg_install=$("$RP_FUSE" config --file "$CONFIG" field plugins.install 2>/dev/null || true)
+if [ -n "$cfg_marketplaces" ]; then
+    if [ -n "$PLUGIN_MARKETPLACES" ]; then
+        PLUGIN_MARKETPLACES="$PLUGIN_MARKETPLACES
 $cfg_marketplaces"
-        else
-            PLUGIN_MARKETPLACES=$cfg_marketplaces
-        fi
+    else
+        PLUGIN_MARKETPLACES=$cfg_marketplaces
     fi
-    if [ -n "$cfg_install" ]; then
-        if [ -n "$PLUGIN_INSTALL" ]; then
-            PLUGIN_INSTALL="$PLUGIN_INSTALL
+fi
+if [ -n "$cfg_install" ]; then
+    if [ -n "$PLUGIN_INSTALL" ]; then
+        PLUGIN_INSTALL="$PLUGIN_INSTALL
 $cfg_install"
-        else
-            PLUGIN_INSTALL=$cfg_install
-        fi
+    else
+        PLUGIN_INSTALL=$cfg_install
     fi
 fi
 
@@ -543,7 +545,136 @@ if [ "${RP_DEBUG:-}" = "1" ]; then
     echo "build-project-image: ↑↑↑" >&2
 fi
 
+# Step 3: content address. The overlay Dockerfile embeds SOURCE_REF (its
+# FROM line); SOURCE_ID and the rp-system digest cover rebuilt local bases.
+HASH=$( {
+    hash_tree "$OVERLAY_CTX"
+    echo "source-id $SOURCE_ID"
+    echo "rp-system $(image_digest "rp-system:$RP_SYSTEM_TAG")"
+} | shasum -a 256 | cut -c1-12)
+TAG="rp-img-$AGENT-$HASH:latest-rp"
+
+if [ "$HASH_ONLY" = "1" ]; then
+    echo "$HASH"
+    exit 0
+fi
+
+# A worktree of a central bare repo (layout C) has no repo home to take
+# config.local.yaml from (ADR-0023). Say so, since plugins and credentials
+# configured there would otherwise silently be missing.
+if [ -f "$WORKSPACE/.git" ] && [ ! -f "$RP_DIR/config.local.yaml" ]; then
+    common=$(git -C "$WORKSPACE" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
+    case "$(basename "${common:-.git}")" in
+        .git|.bare) ;;
+        *) echo "rp: hint — $WORKSPACE is a worktree of $common, which has no repo home for a shared" >&2
+           echo "    .rp/config.local.yaml (ADR-0023). Add one to this worktree if you need personal config." >&2 ;;
+    esac
+fi
+
+image_exists() { container image inspect "$1" >/dev/null 2>&1; }
+
+if [ "${RP_REBUILD:-0}" != "1" ] && image_exists "$TAG"; then
+    echo "build-project-image: reusing $TAG" >&2
+    echo "$TAG"
+    exit 0
+fi
+
+# Serialise builds of the same image: two worktrees starting at once must
+# not build it twice. A lock whose owner died is taken over.
+LOCK_DIR="${RP_LOCK_DIR:-$HOME/.local/share/robo-pen/locks}"
+mkdir -p "$LOCK_DIR"
+lock="$LOCK_DIR/$HASH"
+until mkdir "$lock" 2>/dev/null; do
+    owner=$(cat "$lock/pid" 2>/dev/null || true)
+    if [ -n "$owner" ] && ! kill -0 "$owner" 2>/dev/null; then
+        rm -rf "$lock"
+        continue
+    fi
+    echo "build-project-image: waiting for another build of $TAG" >&2
+    sleep 2
+done
+LOCK=$lock
+echo $$ > "$LOCK/pid"
+
+if [ "${RP_REBUILD:-0}" != "1" ] && image_exists "$TAG"; then
+    echo "build-project-image: reusing $TAG (built concurrently)" >&2
+    echo "$TAG"
+    exit 0
+fi
+
+NO_CACHE=()
+if [ "${RP_REBUILD:-0}" = "1" ]; then
+    NO_CACHE=(--no-cache)
+fi
+
+if [ "${#SOURCE_BUILD[@]}" -gt 0 ] && { [ "${RP_REBUILD:-0}" = "1" ] || ! image_exists "$SOURCE_REF"; }; then
+    echo "build-project-image: building base -> $SOURCE_REF" >&2
+    container build ${NO_CACHE[@]+"${NO_CACHE[@]}"} -t "$SOURCE_REF" "${SOURCE_BUILD[@]}" >&2
+fi
+
+# Step 4: refuse non-Debian/Ubuntu bases up front. The overlay installs
+# fuse3 via apt; Alpine, RHEL, Arch, distroless etc. are not supported in v1.
+# Pull explicitly when the image is not already local — separates pull
+# failures (manifest missing, network error, arch mismatch) from Debian-
+# probe misses. Skip pull for locally-built images (rp-default,
+# images we just built in this script's earlier `build` branch).
+# `container image inspect` returns 0 iff the image exists locally.
+if ! container image inspect "$SOURCE_REF" >/dev/null 2>&1; then
+    if ! pull_err=$(container image pull "$SOURCE_REF" 2>&1); then
+        cat >&2 <<MSG
+build-project-image: failed to pull base image '$SOURCE_REF':
+
+$pull_err
+
+Common causes: image tag does not exist, no arm64 manifest in the manifest
+list, network unreachable, or the registry requires authentication.
+MSG
+        exit 1
+    fi
+fi
+
+# Probe for /etc/debian_version (Debian + Debian-derived like Ubuntu set it).
+# Use apt-get as a secondary signal — some Ubuntu spins drop the file but
+# always have apt-get. Surface stderr from the probe container so a runtime
+# crash (entrypoint issue, libc mismatch, arch mismatch) reads as such
+# instead of masquerading as "wrong distro". Wrap in `if !` so set -e
+# doesn't kill us on the expected failure paths.
+if ! probe_err=$(container run --rm --entrypoint=/bin/sh "$SOURCE_REF" -c '
+    [ -f /etc/debian_version ] && exit 0
+    command -v apt-get >/dev/null 2>&1 && exit 0
+    echo "neither /etc/debian_version nor apt-get found" >&2
+    exit 1
+' 2>&1); then
+    if grep -q 'platform linux/arm64' <<<"$probe_err"; then
+        cat >&2 <<MSG
+build-project-image: base image '$SOURCE_REF' has no linux/arm64 manifest.
+
+$probe_err
+
+Apple Container runs natively on arm64 (Apple Silicon) and does not emulate
+amd64-only images. Pick a base that publishes an arm64 manifest list — most
+official images do (debian, ubuntu, node:*-trixie, python:*-slim-trixie,
+mcr.microsoft.com/devcontainers/javascript-node, etc.). The mcr.microsoft.com
+/devcontainers/universal image is amd64-only at the time of writing.
+MSG
+    else
+        cat >&2 <<MSG
+build-project-image: base image '$SOURCE_REF' rejected:
+
+$probe_err
+
+rp's v1 overlay installs fuse3 via apt-get. Alpine, RHEL, Arch, distroless,
+etc. bases are not supported yet. Use a Debian-based image
+(debian:trixie-slim, ubuntu:24.04, node:*-trixie, python:*-slim-trixie).
+
+See docs/adr/0006-per-project-images-with-rp-overlay.md for the restriction
+and the path to widening it.
+MSG
+    fi
+    exit 1
+fi
+
 echo "build-project-image: building overlay -> $TAG" >&2
-container build -t "$TAG" -f "$OVERLAY_DOCKERFILE" "$OVERLAY_CTX" >&2
+container build ${NO_CACHE[@]+"${NO_CACHE[@]}"} -t "$TAG" -f "$OVERLAY_DOCKERFILE" "$OVERLAY_CTX" >&2
 
 echo "$TAG"

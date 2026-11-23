@@ -14,9 +14,8 @@
 //   * Clean env — clear the inherited environment before exec, set a
 //     small safe baseline. Defense-in-depth against env-based injection
 //     (statically-linked Go binaries already ignore LD_PRELOAD etc.).
-//   * Forwards only RP_DEBUG, which rp-init.sh consults to toggle FUSE
-//     debug logging. Other RP_* vars come via -e flags at container
-//     create time, not through this path.
+//   * Forwards only an explicit allowlist of RP_* vars that rp-init.sh
+//     reads (set via -e flags at container create time); see below.
 //
 // DO NOT extend this binary to take arguments, exec a different target,
 // or read additional config files. Any of those weakens the audit
@@ -56,6 +55,8 @@ func main() {
 	rpCache, hasRPCache := os.LookupEnv("RP_CACHE")
 	rpUser, hasRPUser := os.LookupEnv("RP_USER")
 	rpWorkspace, hasRPWorkspace := os.LookupEnv("RP_WORKSPACE")
+	rpGitDirs, hasRPGitDirs := os.LookupEnv("RP_GIT_DIRS")
+	rpShadowFallback, hasRPShadowFallback := os.LookupEnv("RP_SHADOW_FALLBACK")
 	rpLogDir, hasRPLogDir := os.LookupEnv("RP_LOG_DIR")
 	rpDiagnose, hasRPDiagnose := os.LookupEnv("RP_DIAGNOSE")
 	rpAllowSudo, hasRPAllowSudo := os.LookupEnv("RP_ALLOW_SUDO")
@@ -78,6 +79,12 @@ func main() {
 	}
 	if hasRPWorkspace {
 		os.Setenv("RP_WORKSPACE", rpWorkspace)
+	}
+	if hasRPGitDirs {
+		os.Setenv("RP_GIT_DIRS", rpGitDirs)
+	}
+	if hasRPShadowFallback {
+		os.Setenv("RP_SHADOW_FALLBACK", rpShadowFallback)
 	}
 	if hasRPLogDir {
 		os.Setenv("RP_LOG_DIR", rpLogDir)
