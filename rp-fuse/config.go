@@ -208,7 +208,21 @@ func ParseProjectConfig(path string) (*ProjectConfig, error) {
 //  1. <repo home>/.rp/config.local.yaml, for a linked worktree whose
 //     repo home is not the workspace itself
 //  2. the sibling .rp/config.local.yaml
+//
+// A workspace without a .rp/ dir of its own takes the repo home's whole
+// .rp/ instead (see RPDir), so a repo that doesn't commit .rp/ still
+// configures its worktrees.
 func ConfigLayers(path string) []string {
+	if filepath.Base(filepath.Dir(path)) == ".rp" {
+		workspace := filepath.Dir(filepath.Dir(path))
+		if dir := RPDir(workspace); dir != filepath.Dir(path) {
+			layers := []string{filepath.Join(dir, filepath.Base(path))}
+			if local := filepath.Join(dir, "config.local.yaml"); fileExists(local) {
+				layers = append(layers, local)
+			}
+			return layers
+		}
+	}
 	layers := []string{path}
 	localPath := filepath.Join(filepath.Dir(path), "config.local.yaml")
 	if filepath.Base(filepath.Dir(path)) == ".rp" {
@@ -267,6 +281,29 @@ func RepoHome(workspace string) string {
 		return ""
 	}
 	return home
+}
+
+// RPDir returns the rp config dir that applies to a workspace: its own
+// .rp/ when that exists, else the repo home's .rp/ for a linked worktree
+// (ADR-0023), else <workspace>/.rp (which then doesn't exist). The whole
+// dir is taken from one place, never mixed: a worktree that gets its own
+// .rp/ stops using the repo home's.
+func RPDir(workspace string) string {
+	own := filepath.Join(workspace, ".rp")
+	if dirExists(own) {
+		return own
+	}
+	if home := RepoHome(workspace); home != "" {
+		if dir := filepath.Join(home, ".rp"); dirExists(dir) {
+			return dir
+		}
+	}
+	return own
+}
+
+func dirExists(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && st.IsDir()
 }
 
 func fileExists(path string) bool {

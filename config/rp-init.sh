@@ -118,11 +118,15 @@ discover_workspaces() {
             case "$entry" in
                 *:ro) p=${entry%:ro}; ro=":ro" ;;
             esac
-            if [ -d "$p/.rp" ]; then
+            # rp lists its workspaces explicitly, so no .rp/ marker is
+            # needed: a worktree of a repo that doesn't commit .rp/ takes
+            # the repo home's rules (RP_SHADOW_FALLBACK), anything else
+            # runs with an empty rule set (ADR-0023).
+            if [ -d "$p" ]; then
                 echo "$p$ro"
                 any=1
             else
-                echo "rp-init: WARN RP_WORKSPACE entry '$p' has no .rp/, skipping" >&2
+                echo "rp-init: WARN RP_WORKSPACE entry '$p' does not exist, skipping" >&2
             fi
         done
         [ "$any" -eq 1 ] && return 0
@@ -306,6 +310,21 @@ cover_and_register() {
 for entry in "${WORKSPACES[@]}"; do
     parse_entry "$entry"
     cover_and_register "$ENTRY_PATH" "$ENTRY_RO_SUFFIX"
+done
+
+# Shadow rules captured from the repo home for workspaces without .rp/
+# (ADR-0023). Written root-only under /var/lib/rp (0700); rp-fuse uses a
+# file only while its workspace has no .rp/.
+rules_slot=0
+for pair in ${RP_SHADOW_FALLBACK:-}; do
+    ws=${pair%%=*}
+    mkdir -p /var/lib/rp/rules
+    rules_file=/var/lib/rp/rules/$rules_slot
+    printf '%s' "${pair#*=}" | base64 -d > "$rules_file" 2>/dev/null \
+        || die "cannot decode the fallback shadow rules for $ws"
+    FUSE_ARGS+=(--rules "$ws=$rules_file")
+    echo "rp-init: shadow rules for $ws from the repo home's .rp/shadow" >&2
+    rules_slot=$((rules_slot + 1))
 done
 
 # Git stores outside the workspaces, e.g. a worktree's common dir

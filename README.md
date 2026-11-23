@@ -67,7 +67,7 @@ rp login                  # run the agent's login flow (e.g. Claude subscription
 rp stop                   # pause
 rp start                  # resume
 rp destroy                # remove container + its volumes (host files and repo memory untouched)
-rp list                   # show all rp-* containers + their workspace paths
+rp list                   # show all rp-* containers + their workspace paths (--json for scripts)
 rp lint                   # check .rp/{shadow,config.yaml,agents/} in cwd
 rp gc                     # list + remove leftovers: containers of deleted folders, unused images (asks first)
 rp purge                  # NUCLEAR: destroy all rp containers + remove all rp images (RP_PURGE_YES=1 to confirm)
@@ -81,6 +81,8 @@ rp create --name my-name                       # explicit container name
 rp create . /Users/me/docs:ro                  # multi-workspace + read-only
 rp run --name my-name -- "summarize the README"
 ```
+
+Worktrees share the main checkout's setup. A worktree without a `.rp/` of its own, because the repo doesn't commit it, uses the main checkout's `.rp/` as a whole: `config.yaml`, `shadow` and the rest. Personal settings in the main checkout's `.rp/config.local.yaml` (credentials, `host_files`, plugins) apply to every worktree either way. Shadow rules taken from the main checkout are read when the container is created, so after changing them run `rp recreate` in the worktrees.
 
 Agent state lives on the Mac under `~/.local/share/robo-pen/volumes/`. Each container's `~/.claude` (login, session history) belongs to its folder and survives `rp recreate`. Claude Code's auto-memory belongs to the repo: all worktree containers of a repo share it, and it outlives them. It stays separate from the memory of Claude Code sessions on the Mac itself. `rp destroy` removes a container's `~/.claude` volume but not the repo's memory. Nothing is cleaned up when you delete a worktree; `rp run` points out containers whose folder is gone, and `rp gc` lists and removes them.
 

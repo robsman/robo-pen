@@ -141,9 +141,7 @@ write_dst() {
 {
     "$RP_FUSE" profile --workspace "$WORKSPACE" --repo-dir "$REPO_DIR" --agent "$AGENT" \
         field host_files 2>/dev/null || true
-    if [ -f "$WORKSPACE/.rp/config.yaml" ]; then
-        "$RP_FUSE" config --file "$WORKSPACE/.rp/config.yaml" field host_files 2>/dev/null || true
-    fi
+    "$RP_FUSE" config --file "$WORKSPACE/.rp/config.yaml" field host_files 2>/dev/null || true
 } | while IFS=$'\t' read -r src dst if_missing; do
         [ -z "$src" ] && continue
         host_src=$(expand_tilde "$src")
@@ -165,9 +163,7 @@ write_dst() {
 {
     "$RP_FUSE" profile --workspace "$WORKSPACE" --repo-dir "$REPO_DIR" --agent "$AGENT" \
         field host_keychain 2>/dev/null || true
-    if [ -f "$WORKSPACE/.rp/config.yaml" ]; then
-        "$RP_FUSE" config --file "$WORKSPACE/.rp/config.yaml" field host_keychain 2>/dev/null || true
-    fi
+    "$RP_FUSE" config --file "$WORKSPACE/.rp/config.yaml" field host_keychain 2>/dev/null || true
 } | while IFS=$'\t' read -r service dst mode if_missing; do
         [ -z "$service" ] && continue
         expanded_dst=$(expand_user_template "$dst")

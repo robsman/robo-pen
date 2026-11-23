@@ -31,8 +31,11 @@ A workspace mounted with `:ro` (e.g. `rp create . /Users/me/docs:ro`). The FUSE 
 _Avoid_: read-only mount (too generic), frozen workspace.
 
 **Shadow rules**:
-The pattern set in `.rp/shadow` that determines which paths are shadowed. Syntax follows `.gitignore`: leading `/` and mid-slash anchor to root, `*` / `**` / `?` / `[…]` globs, trailing `/` for directory-only, `!`-prefix for negation (re-expose a path; last-match-wins). The container sees the file but cannot modify it (writes return EROFS); only the host can edit the rules. The same applies to the whole `.rp/` tree, including renaming or removing `.rp` itself. To re-expose a subtree under a shadowed parent, use per-child patterns (`dir/*` + `dir/**/*` + `!dir/sub` + `!dir/sub/**`) — `dir/**` alone also matches `dir` itself, which would prevent the FUSE Lookup from drilling into the re-exposed subtree.
+The pattern set in `.rp/shadow` that determines which paths are shadowed. Syntax follows `.gitignore`: leading `/` and mid-slash anchor to root, `*` / `**` / `?` / `[…]` globs, trailing `/` for directory-only, `!`-prefix for negation (re-expose a path; last-match-wins). The container sees the file but cannot modify it (writes return EROFS); only the host can edit the rules. The same applies to the whole `.rp/` tree, including renaming or removing `.rp` itself. To re-expose a subtree under a shadowed parent, use per-child patterns (`dir/*` + `dir/**/*` + `!dir/sub` + `!dir/sub/**`) — `dir/**` alone also matches `dir` itself, which would prevent the FUSE Lookup from drilling into the re-exposed subtree. A linked worktree without a `.rp/` of its own (the repo doesn't commit it) uses the repo home's rules, captured at create and passed in as `RP_SHADOW_FALLBACK`; the container can't create a `.rp/` to switch them off (ADR-0023).
 _Avoid_: ignore patterns, ccrignore rules.
+
+**Rp dir**:
+The `.rp/` directory that applies to a workspace: its own when it exists, else, for a linked worktree, the repo home's (`rp-fuse rpdir <workspace>`). Taken as a whole, never mixed: config, shadow rules, Dockerfile, instructions and agent overrides all come from it. The repo home's `config.local.yaml` is layered on top either way (ADR-0023).
 
 ### Image layers
 

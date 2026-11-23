@@ -47,7 +47,7 @@ func TestProtectedTreeOverFUSE(t *testing.T) {
 	defer syscall.Close(fd)
 
 	mnt := t.TempDir()
-	m, err := mountOne(WorkspaceSpec{Path: mnt, BackingFd: fd}, t.TempDir(), 0, false)
+	m, err := mountOne(WorkspaceSpec{Path: mnt, BackingFd: fd}, "", t.TempDir(), 0, false)
 	if err != nil {
 		t.Skipf("FUSE mount unavailable: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestLinkRegions(t *testing.T) {
 	defer syscall.Close(fd)
 
 	mnt := t.TempDir()
-	m, err := mountOne(WorkspaceSpec{Path: mnt, BackingFd: fd}, t.TempDir(), 0, false)
+	m, err := mountOne(WorkspaceSpec{Path: mnt, BackingFd: fd}, "", t.TempDir(), 0, false)
 	if err != nil {
 		t.Skipf("FUSE mount unavailable: %v", err)
 	}

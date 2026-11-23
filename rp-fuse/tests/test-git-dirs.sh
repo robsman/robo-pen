@@ -50,4 +50,13 @@ eq "$(run "$T/projb/sub")" "" "subdirectory gets no git"
     || fail "subdirectory warning missing"
 eq "$(RP_NO_WORKTREE_BIND=1 run "$T/proja/main")" "" "opt-out"
 
+# A worktree with its main checkout mounted `:ro`: the git dir is inside
+# a read-only workspace, so the worktree can't commit. Warn; a writable
+# main is fine.
+eq "$(run "$T/projb-feat" "$T/projb:ro")" "" "common dir inside a read-only workspace"
+"$R" "$T/projb-feat" "$T/projb:ro" 2>&1 >/dev/null | grep -q "git can't commit from it" \
+    || fail "read-only git dir warning missing"
+[ -z "$("$R" "$T/projb-feat" "$T/projb" 2>&1 >/dev/null)" ] \
+    || fail "warning for a read-write main checkout"
+
 echo "OK test-git-dirs"

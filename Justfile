@@ -373,6 +373,8 @@ _ensure: _service-ensure
             bind_args+=(-v "$p:$p")
             git_dirs_env="${git_dirs_env:+$git_dirs_env }$entry"
         done < <( {{justfile_directory()}}/scripts/resolve-git-dirs.sh "${ws_entries[@]}" )
+        # Shadow rules for worktrees without their own .rp/ (ADR-0023).
+        shadow_fallback=$( {{justfile_directory()}}/scripts/resolve-shadow-fallback.sh "${ws_entries[@]}" )
         # Persistent volumes declared by the agent profile (ADR-0014, ADR-0024).
         # mkdirs the host backing dir + emits one TSV line per volume.
         # Forward the (mount\tname) pairs to init.sh via RP_VOLUMES so it
@@ -408,6 +410,7 @@ _ensure: _service-ensure
             $CREATE_FLAGS \
             -e "RP_WORKSPACE=$RP_WORKSPACE_ENV" \
             -e "RP_GIT_DIRS=$git_dirs_env" \
+            -e "RP_SHADOW_FALLBACK=$shadow_fallback" \
             "${vol_env[@]+${vol_env[@]}}" \
             "${bind_args[@]}" \
             ${extra_args[@]+"${extra_args[@]}"} \
@@ -489,6 +492,8 @@ create: _service-ensure
         bind_args+=(-v "$p:$p")
         git_dirs_env="${git_dirs_env:+$git_dirs_env }$entry"
     done < <( {{justfile_directory()}}/scripts/resolve-git-dirs.sh "${ws_entries[@]}" )
+    # Shadow rules for worktrees without their own .rp/ (ADR-0023).
+    shadow_fallback=$( {{justfile_directory()}}/scripts/resolve-shadow-fallback.sh "${ws_entries[@]}" )
     # Persistent volumes (ADR-0014, ADR-0024). Same mechanism as _ensure.
     volume_pairs=""
     while IFS=$'\t' read -r host_dir cont_mount vol_name; do
@@ -520,6 +525,7 @@ create: _service-ensure
         $CREATE_FLAGS \
         -e "RP_WORKSPACE=$RP_WORKSPACE_ENV" \
         -e "RP_GIT_DIRS=$git_dirs_env" \
+        -e "RP_SHADOW_FALLBACK=$shadow_fallback" \
         "${vol_env[@]+${vol_env[@]}}" \
         "${bind_args[@]}" \
         ${extra_args[@]+"${extra_args[@]}"} \
@@ -661,10 +667,40 @@ recreate: _service-ensure
 
 # ── Info / diagnostics ────────────────────────────────────────────
 
-# List all rp-managed containers (grouped by workspace path, with agent column)
-list:
+# List all rp-managed containers (grouped by workspace path, with agent
+# column). --json prints one object per container for tools that drive rp:
+#   container  full container name
+#   name       the --name value that selects it (container minus rp-<agent>-)
+#   agent, state ("running", "stopped", ...)
+#   path       primary workspace, the container's identity (ADR-0021)
+#   workspaces [{path, read_only}], primary first
+#   name_explicit, image_hash, volume_key (empty for pre-worktree containers)
+list *FLAGS:
     #!/usr/bin/env bash
     set -u
+    if [ "{{FLAGS}}" = "--json" ]; then
+        container list -a --format json | jq '[.[]
+            | select(.configuration.labels["rp.managed"] == "true")
+            | .configuration as $c
+            | ($c.labels["rp.agent"] // "") as $agent
+            | ([$c.initProcess.environment[]? | select(startswith("RP_WORKSPACE=")) | sub("^RP_WORKSPACE="; "")][0] // "") as $ws
+            | {
+                container: $c.id,
+                name: ($c.id | ltrimstr("rp-" + $agent + "-")),
+                agent: $agent,
+                state: .status.state,
+                path: ($c.labels["rp.host_path"] // ""),
+                workspaces: [$ws | split(" ")[] | select(. != "")
+                    | {path: sub(":ro$"; ""), read_only: endswith(":ro")}],
+                name_explicit: ($c.labels["rp.name_explicit"] == "1"),
+                image_hash: ($c.labels["rp.image_hash"] // ""),
+                volume_key: ($c.labels["rp.volume_key"] // "")
+            }] | sort_by(.path, .container)'
+        exit
+    elif [ -n "{{FLAGS}}" ]; then
+        echo "usage: rp list [--json]" >&2
+        exit 2
+    fi
     {
         printf "WORKSPACE\tAGENT\tNAME\tSTATUS\n"
         container list -a -q 2>/dev/null | grep "^{{list_prefix}}" 2>/dev/null | (while read -r n; do

@@ -42,7 +42,7 @@ Usage:
   rp logs     [--name N]
   rp init [--force]
   rp lint
-  rp list | rp stats
+  rp list [--json] | rp stats
   rp gc [--yes] [--memory] [--legacy]
   rp pull-images | rp purge
   rp build | rp build-base | rp build-host | rp rebuild

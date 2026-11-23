@@ -420,7 +420,7 @@ func ResolveProfile(workspace, repoDir, agentName string) (string, string, error
 		return "", "", fmt.Errorf("resolve profile: %w", err)
 	}
 	if workspace != "" {
-		dir := filepath.Join(workspace, ".rp", "agents", agentName)
+		dir := filepath.Join(RPDir(workspace), "agents", agentName)
 		if hasManifest(dir) {
 			return dir, "workspace", nil
 		}

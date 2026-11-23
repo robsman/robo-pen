@@ -116,10 +116,20 @@ func main() {
 		case "profile":
 			runProfile(os.Args[2:])
 			return
+		case "rpdir":
+			// rp-fuse rpdir <workspace>: the .rp/ dir that applies to it.
+			if len(os.Args) != 3 {
+				fmt.Fprintln(os.Stderr, "usage: rp-fuse rpdir <workspace>")
+				os.Exit(2)
+			}
+			fmt.Println(RPDir(os.Args[2]))
+			return
 		}
 	}
 
 	var workspaces workspaceFlag
+	rulesFiles := rulesFlag{}
+	flag.Var(&rulesFiles, "rules", "<path>=<file>, repeatable. Shadow rules for the workspace at path when it has no .rp/ of its own (the repo home's .rp/shadow, captured at create; ADR-0023).")
 	flag.Var(&workspaces, "workspace", "<path>=<fd>[:ro], repeatable. path is the FUSE mountpoint (1:1 with the host bind path). fd is an inherited open file descriptor on the host bind.")
 	shadow := flag.String("shadow", "", "base shadow store dir; per-workspace subdirs derived from sha256(path)[:8]")
 	debug := flag.Bool("debug", false, "enable FUSE debug logging")
@@ -149,7 +159,7 @@ func main() {
 	}
 
 	for _, spec := range workspaces {
-		m, err := mountOne(spec, *shadow, ttl, *debug)
+		m, err := mountOne(spec, rulesFiles[spec.Path], *shadow, ttl, *debug)
 		if err != nil {
 			log.Printf("mount %s failed: %v; rolling back %d earlier mount(s)", spec.Path, err, len(servers))
 			cleanup()
@@ -192,9 +202,24 @@ func main() {
 	log.Print("rp-fuse: all servers exited")
 }
 
+// rulesFlag maps a workspace path to a fallback rules file.
+type rulesFlag map[string]string
+
+func (rf rulesFlag) String() string { return "" }
+
+func (rf rulesFlag) Set(s string) error {
+	eq := strings.IndexByte(s, '=')
+	if eq <= 0 || eq == len(s)-1 {
+		return errors.New("want --rules <path>=<file>")
+	}
+	rf[s[:eq]] = s[eq+1:]
+	return nil
+}
+
 // mountOne wires up one FUSE tree for a single workspace and returns the
 // server. The caller is responsible for unmounting on shutdown.
-func mountOne(spec WorkspaceSpec, shadowBase string, ttl time.Duration, debug bool) (*mounted, error) {
+// fallbackRules, if set, is used only while the workspace has no .rp/.
+func mountOne(spec WorkspaceSpec, fallbackRules, shadowBase string, ttl time.Duration, debug bool) (*mounted, error) {
 	backing := fmt.Sprintf("/proc/self/fd/%d", spec.BackingFd)
 	shadow := filepath.Join(shadowBase, workspaceKey(spec.Path))
 	if err := os.MkdirAll(shadow, 0o755); err != nil {
@@ -204,6 +229,11 @@ func mountOne(spec WorkspaceSpec, shadowBase string, ttl time.Duration, debug bo
 	// Rules file lives inside the workspace at .rp/shadow. We reach it via
 	// the fd so any overmount on the path can't interfere with the lookup.
 	rulesPath := filepath.Join(backing, ".rp", "shadow")
+	if fallbackRules != "" {
+		if _, err := os.Stat(filepath.Join(backing, ".rp")); os.IsNotExist(err) {
+			rulesPath = fallbackRules
+		}
+	}
 	rules, err := ParseRulesFile(rulesPath)
 	if err != nil {
 		return nil, fmt.Errorf("parse rules %s: %w", rulesPath, err)

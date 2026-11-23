@@ -56,6 +56,7 @@ func main() {
 	rpUser, hasRPUser := os.LookupEnv("RP_USER")
 	rpWorkspace, hasRPWorkspace := os.LookupEnv("RP_WORKSPACE")
 	rpGitDirs, hasRPGitDirs := os.LookupEnv("RP_GIT_DIRS")
+	rpShadowFallback, hasRPShadowFallback := os.LookupEnv("RP_SHADOW_FALLBACK")
 	rpLogDir, hasRPLogDir := os.LookupEnv("RP_LOG_DIR")
 	rpDiagnose, hasRPDiagnose := os.LookupEnv("RP_DIAGNOSE")
 	rpAllowSudo, hasRPAllowSudo := os.LookupEnv("RP_ALLOW_SUDO")
@@ -81,6 +82,9 @@ func main() {
 	}
 	if hasRPGitDirs {
 		os.Setenv("RP_GIT_DIRS", rpGitDirs)
+	}
+	if hasRPShadowFallback {
+		os.Setenv("RP_SHADOW_FALLBACK", rpShadowFallback)
 	}
 	if hasRPLogDir {
 		os.Setenv("RP_LOG_DIR", rpLogDir)

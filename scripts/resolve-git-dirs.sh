@@ -26,8 +26,10 @@ inside() {
 }
 
 paths=()
+ro_paths=()  # parallel to paths: 1 if mounted :ro
 for entry in "$@"; do
     paths+=("${entry%:ro}")
+    if [ "$entry" != "${entry%:ro}" ]; then ro_paths+=(1); else ro_paths+=(0); fi
 done
 
 dirs=()   # common dirs, in first-seen order
@@ -48,8 +50,17 @@ for entry in "$@"; do
     fi
 
     covered=0
-    for w in "${paths[@]}"; do
-        inside "$RP_GIT_COMMON" "$w" && covered=1 && break
+    for i in "${!paths[@]}"; do
+        inside "$RP_GIT_COMMON" "${paths[$i]}" || continue
+        covered=1
+        # The common dir is then only reachable read-only, so commits and
+        # every other ref or object write from this workspace fail.
+        if [ "$mode" = rw ] && [ "${ro_paths[$i]}" = 1 ]; then
+            echo "rp: warning — $p is a worktree whose git dir $RP_GIT_COMMON lies inside the" >&2
+            echo "    read-only workspace ${paths[$i]}; git can't commit from it. Drop ${paths[$i]}" >&2
+            echo "    (rp binds the git dir on its own) or mount it read-write." >&2
+        fi
+        break
     done
     [ "$covered" -eq 1 ] && continue
 

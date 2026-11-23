@@ -65,8 +65,12 @@ if [ ! -x "$RP_FUSE" ]; then
     exit 1
 fi
 
+# The .rp/ dir that applies: the workspace's own, or for a worktree
+# without one, the repo home's (ADR-0023). rp-fuse resolves the config
+# layers from the workspace path itself.
+RP_DIR=$("$RP_FUSE" rpdir "$WORKSPACE")
 CONFIG="$WORKSPACE/.rp/config.yaml"
-DEFAULT_DOCKERFILE="$WORKSPACE/.rp/Dockerfile"
+DEFAULT_DOCKERFILE="$RP_DIR/Dockerfile"
 
 # Resolve agent + user from .rp/config.yaml (or defaults).
 AGENT=$("$RP_FUSE" config --file "$CONFIG" field agent 2>/dev/null || echo "claude-code")
@@ -117,7 +121,7 @@ case "$SOURCE" in
     build)
         CTX_REL=$("$RP_FUSE" config --file "$CONFIG" field context)
         DF_REL=$("$RP_FUSE" config --file "$CONFIG" field dockerfile)
-        CONTEXT=$(cd "$WORKSPACE/.rp/$CTX_REL" && pwd)
+        CONTEXT=$(cd "$RP_DIR/$CTX_REL" && pwd)
         DOCKERFILE="$CONTEXT/$DF_REL"
         src_hash=$( { shasum -a 256 <"$DOCKERFILE"; hash_tree "$CONTEXT"; } | shasum -a 256 | cut -c1-12)
         SOURCE_REF="rp-src-$src_hash:latest"
@@ -126,10 +130,10 @@ case "$SOURCE" in
         echo "build-project-image: source=build dockerfile=$DOCKERFILE context=$CONTEXT" >&2
         ;;
     dockerfile_default)
-        src_hash=$( { shasum -a 256 <"$DEFAULT_DOCKERFILE"; hash_tree "$WORKSPACE/.rp"; } | shasum -a 256 | cut -c1-12)
+        src_hash=$( { shasum -a 256 <"$DEFAULT_DOCKERFILE"; hash_tree "$RP_DIR"; } | shasum -a 256 | cut -c1-12)
         SOURCE_REF="rp-src-$src_hash:latest"
         SOURCE_ID=""
-        SOURCE_BUILD=(-f "$DEFAULT_DOCKERFILE" "$WORKSPACE/.rp")
+        SOURCE_BUILD=(-f "$DEFAULT_DOCKERFILE" "$RP_DIR")
         echo "build-project-image: source=.rp/Dockerfile" >&2
         ;;
     default)
@@ -181,8 +185,8 @@ while IFS=$'\t' read -r src dst; do
 done <<<"$FILES_LINES"
 
 # Optional workspace-level instruction fragment.
-if [ -f "$WORKSPACE/.rp/instructions.md" ]; then
-    cp "$WORKSPACE/.rp/instructions.md" "$OVERLAY_CTX/agent/workspace-instructions.md"
+if [ -f "$RP_DIR/instructions.md" ]; then
+    cp "$RP_DIR/instructions.md" "$OVERLAY_CTX/agent/workspace-instructions.md"
 fi
 
 INSTRUCTIONS_DST=$("$RP_FUSE" profile --workspace "$WORKSPACE" --repo-dir "$REPO_DIR" --agent "$AGENT" field instructions_dst || true)
@@ -406,27 +410,26 @@ EOF
 PLUGIN_MARKETPLACES=$("$RP_FUSE" profile --workspace "$WORKSPACE" --repo-dir "$REPO_DIR" --agent "$AGENT" field plugins.marketplaces 2>/dev/null || true)
 PLUGIN_INSTALL=$("$RP_FUSE" profile --workspace "$WORKSPACE" --repo-dir "$REPO_DIR" --agent "$AGENT" field plugins.install 2>/dev/null || true)
 
-# Workspace-level additions (.rp/config.yaml). Appended to whatever the
-# profile already declared, in order. Lets users add personal plugins
-# without overriding the entire profile bundle. See ADR-0016.
-if [ -f "$WORKSPACE/.rp/config.yaml" ]; then
-    cfg_marketplaces=$("$RP_FUSE" config --file "$WORKSPACE/.rp/config.yaml" field plugins.marketplaces 2>/dev/null || true)
-    cfg_install=$("$RP_FUSE" config --file "$WORKSPACE/.rp/config.yaml" field plugins.install 2>/dev/null || true)
-    if [ -n "$cfg_marketplaces" ]; then
-        if [ -n "$PLUGIN_MARKETPLACES" ]; then
-            PLUGIN_MARKETPLACES="$PLUGIN_MARKETPLACES
+# Workspace-level additions (.rp/config.yaml and its local layers).
+# Appended to whatever the profile already declared, in order. Lets users
+# add personal plugins without overriding the entire profile bundle. See
+# ADR-0016.
+cfg_marketplaces=$("$RP_FUSE" config --file "$CONFIG" field plugins.marketplaces 2>/dev/null || true)
+cfg_install=$("$RP_FUSE" config --file "$CONFIG" field plugins.install 2>/dev/null || true)
+if [ -n "$cfg_marketplaces" ]; then
+    if [ -n "$PLUGIN_MARKETPLACES" ]; then
+        PLUGIN_MARKETPLACES="$PLUGIN_MARKETPLACES
 $cfg_marketplaces"
-        else
-            PLUGIN_MARKETPLACES=$cfg_marketplaces
-        fi
+    else
+        PLUGIN_MARKETPLACES=$cfg_marketplaces
     fi
-    if [ -n "$cfg_install" ]; then
-        if [ -n "$PLUGIN_INSTALL" ]; then
-            PLUGIN_INSTALL="$PLUGIN_INSTALL
+fi
+if [ -n "$cfg_install" ]; then
+    if [ -n "$PLUGIN_INSTALL" ]; then
+        PLUGIN_INSTALL="$PLUGIN_INSTALL
 $cfg_install"
-        else
-            PLUGIN_INSTALL=$cfg_install
-        fi
+    else
+        PLUGIN_INSTALL=$cfg_install
     fi
 fi
 
@@ -559,7 +562,7 @@ fi
 # A worktree of a central bare repo (layout C) has no repo home to take
 # config.local.yaml from (ADR-0023). Say so, since plugins and credentials
 # configured there would otherwise silently be missing.
-if [ -f "$WORKSPACE/.git" ] && [ ! -f "$WORKSPACE/.rp/config.local.yaml" ]; then
+if [ -f "$WORKSPACE/.git" ] && [ ! -f "$RP_DIR/config.local.yaml" ]; then
     common=$(git -C "$WORKSPACE" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
     case "$(basename "${common:-.git}")" in
         .git|.bare) ;;

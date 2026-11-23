@@ -699,3 +699,80 @@ func TestParseProjectConfig_NoFallbackForCentralBareRepo(t *testing.T) {
 		t.Errorf("image = %q, want empty (no fallback in layout C)", cfg.Image)
 	}
 }
+
+func TestRPDir_WorktreeWithoutRPUsesRepoHome(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "proj")
+	wt := filepath.Join(root, "proj-feat")
+	writeWorktree(t, wt, filepath.Join(home, ".git"), "proj-feat", false)
+	if err := os.RemoveAll(filepath.Join(wt, ".rp")); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(home, ".rp", "config.yaml"), "user: homeuser\n")
+	writeFile(t, filepath.Join(home, ".rp", "config.local.yaml"), "image: home-image\n")
+	cfgPath := filepath.Join(wt, ".rp", "config.yaml")
+
+	if got := RPDir(wt); got != filepath.Join(home, ".rp") {
+		t.Fatalf("RPDir = %s, want the repo home's .rp", got)
+	}
+	cfg, err := ParseProjectConfig(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.User != "homeuser" || cfg.Image != "home-image" {
+		t.Errorf("user=%q image=%q, want the repo home's config.yaml + config.local.yaml", cfg.User, cfg.Image)
+	}
+	want := []string{filepath.Join(home, ".rp", "config.yaml"), filepath.Join(home, ".rp", "config.local.yaml")}
+	if got := ConfigLayers(cfgPath); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("layers = %v, want %v", got, want)
+	}
+
+	// Once the worktree has its own .rp/, the repo home's config.yaml no
+	// longer applies; only its config.local.yaml is still layered.
+	writeFile(t, filepath.Join(wt, ".rp", "config.yaml"), "agent: claude-code\n")
+	if got := RPDir(wt); got != filepath.Join(wt, ".rp") {
+		t.Fatalf("RPDir = %s, want the worktree's own .rp", got)
+	}
+	cfg, err = ParseProjectConfig(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.User != "" || cfg.Image != "home-image" {
+		t.Errorf("user=%q image=%q, want own config.yaml + repo home config.local.yaml", cfg.User, cfg.Image)
+	}
+}
+
+func TestRPDir_NoFallbackOutsideLinkedWorktrees(t *testing.T) {
+	root := t.TempDir()
+	plain := filepath.Join(root, "plain")
+	if err := os.MkdirAll(filepath.Join(plain, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := RPDir(plain); got != filepath.Join(plain, ".rp") {
+		t.Errorf("RPDir = %s, want %s", got, filepath.Join(plain, ".rp"))
+	}
+	wt := filepath.Join(root, "src", "projc-main")
+	writeWorktree(t, wt, filepath.Join(root, "repos", "projc.git"), "projc-main", false)
+	if err := os.RemoveAll(filepath.Join(wt, ".rp")); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(root, "repos", ".rp", "config.yaml"), "image: wrong\n")
+	if got := RPDir(wt); got != filepath.Join(wt, ".rp") {
+		t.Errorf("RPDir = %s, central bare repos must not fall back", got)
+	}
+}
+
+func TestRulesFlag(t *testing.T) {
+	rf := rulesFlag{}
+	if err := rf.Set("/ws/a=/var/lib/rp/rules/0"); err != nil {
+		t.Fatal(err)
+	}
+	if rf["/ws/a"] != "/var/lib/rp/rules/0" {
+		t.Errorf("rules = %v", rf)
+	}
+	for _, bad := range []string{"noequals", "=/file", "/ws="} {
+		if err := rf.Set(bad); err == nil {
+			t.Errorf("Set(%q) accepted", bad)
+		}
+	}
+}

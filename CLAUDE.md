@@ -42,7 +42,7 @@ rp create . /Users/me/shared-libs            # cwd + shared-libs, bound to cwd
 rp create /a /b:ro                           # /a writable, /b read-only; name = a
 
 # Info
-rp list                 # all rp-managed containers, status, workspace path
+rp list [--json]        # all rp-managed containers, status, workspace path (--json: stable fields for tools)
 rp stats                # CPU/memory usage
 rp logs                 # container log output
 rp lint                 # validate .rp/{shadow,config.yaml,agents/}
@@ -64,6 +64,7 @@ scripts/
   build-project-image.sh — composes the per-project image (rp overlay onto image: ref or .rp/Dockerfile output)
   resolve-create-args.sh — translates .rp/config.yaml + agent profile into `container create` flags
   resolve-git-dirs.sh   — git stores to bind besides the workspaces, e.g. a worktree's common dir (ADR-0019)
+  resolve-shadow-fallback.sh — repo home's .rp/shadow for worktrees without their own .rp/ (ADR-0023)
   lib-identity.sh       — container lookup by path, naming, on-disk keys (ADR-0021)
   gc.sh                 — `rp gc`: orphan containers/volumes, unused images; lists, then asks (ADR-0025)
   migrate-legacy-volumes.sh — `rp recreate` moves pre-ADR-0024 volumes to the workspace key
