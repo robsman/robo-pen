@@ -67,9 +67,10 @@ rp login                  # run the agent's login flow (e.g. Claude subscription
 rp stop                   # pause
 rp start                  # resume
 rp destroy                # remove container + its volumes (host files and repo memory untouched)
+rp recreate               # new container from the current config, same name + volumes (--rebuild: fresh image)
 rp list                   # show all rp-* containers + their workspace paths (--json for scripts)
 rp lint                   # check .rp/{shadow,config.yaml,agents/} in cwd
-rp gc                     # list + remove leftovers: containers of deleted folders, unused images (asks first)
+rp gc                     # list + remove leftovers: containers + volumes of deleted folders, unused images (asks first)
 rp purge                  # NUCLEAR: destroy all rp containers + remove all rp images (RP_PURGE_YES=1 to confirm)
 rp --version              # print rp version (matches the pulled image tag)
 ```
@@ -82,15 +83,17 @@ rp create . /Users/me/docs:ro                  # multi-workspace + read-only
 rp run --name my-name -- "summarize the README"
 ```
 
+Every workspace is served by `rp-fuse`, with or without a `.rp/`, so `:ro` is enforced. From a worktree, don't add the main checkout as `:ro`: the worktree's git dir lies inside it, so git couldn't commit, and rp warns. rp binds the git dir on its own.
+
 Worktrees share the main checkout's setup. A worktree without a `.rp/` of its own, because the repo doesn't commit it, uses the main checkout's `.rp/` as a whole: `config.yaml`, `shadow` and the rest. Personal settings in the main checkout's `.rp/config.local.yaml` (credentials, `host_files`, plugins) apply to every worktree either way. Shadow rules taken from the main checkout are read when the container is created, so after changing them run `rp recreate` in the worktrees.
 
-Agent state lives on the Mac under `~/.local/share/robo-pen/volumes/`. Each container's `~/.claude` (login, session history) belongs to its folder and survives `rp recreate`. Claude Code's auto-memory belongs to the repo: all worktree containers of a repo share it, and it outlives them. It stays separate from the memory of Claude Code sessions on the Mac itself. `rp destroy` removes a container's `~/.claude` volume but not the repo's memory. Nothing is cleaned up when you delete a worktree; `rp run` points out containers whose folder is gone, and `rp gc` lists and removes them.
+Agent state lives on the Mac under `~/.local/share/robo-pen/volumes/`. Each container's `~/.claude` (login, session history) belongs to its folder and survives `rp recreate`. Claude Code's auto-memory belongs to the repo: all worktree containers of a repo share it, and it outlives them. It stays separate from the memory of Claude Code sessions on the Mac itself. `rp destroy` removes a container's `~/.claude` volume but not the repo's memory. Nothing is cleaned up when you delete a worktree; `rp run` points out containers whose folder is gone, and `rp gc` lists and removes them with their volumes. A repo's memory is removed only with `rp gc --memory`, once the repo itself is gone.
 
 ---
 
 ## `.rp/shadow` — selective shadowing
 
-Put a `.rp/shadow` file at the root of any workspace to filter paths between host and container. Syntax is a strict subset of `.gitignore`:
+Put a `.rp/shadow` file at the root of any workspace to filter paths between host and container. A worktree without a `.rp/` of its own uses the main checkout's `.rp/shadow`. Syntax is a strict subset of `.gitignore`:
 
 ```
 # secrets — host versions stay invisible inside the container
@@ -123,9 +126,9 @@ For every matched path:
 - Host's file/dir is invisible (`stat` returns ENOENT until the container writes there).
 - Container creates/writes/deletes go to `/var/lib/rp/shadow/<rel-path>`, never to the host bind.
 - `rm -rf node_modules && npm install` cycles work normally — host stays untouched.
-- The shadow store survives `rp stop`/`start`. `rp destroy` wipes it.
+- The shadow store survives `rp stop`/`start`. `rp destroy` and `rp recreate` wipe it.
 
-Edit `.rp/shadow` from the host. Inside the container the whole `.rp/` tree (rules, `config.yaml`, `agents/`, `Dockerfile`) is **read-only** — the agent can `cat` it to understand what's filtered but cannot modify, rename or delete anything in it. Changes require `rp stop && rp start` to take effect.
+Edit `.rp/shadow` from the host. Inside the container the whole `.rp/` tree (rules, `config.yaml`, `agents/`, `Dockerfile`) is **read-only** — the agent can `cat` it to understand what's filtered but cannot modify, rename or delete anything in it. Changes require `rp stop && rp start` to take effect. A worktree using the main checkout's rules gets them at create time, so it needs `rp recreate` instead.
 
 See `.rp.example/shadow` for a copy-paste-ready starting point.
 
@@ -160,7 +163,7 @@ Each container runs one **agent**. Agents are profile bundles that define how to
 
 - **Built-in profile:** `agent.profiles/claude-code/` (Anthropic Claude Code, v1's only shipped profile).
 - **Workspace override:** drop `manifest.yaml` + scripts at `<workspace>/.rp/agents/<name>/` to override the built-in or define a new agent without patching robo-pen. See `examples/opencode/` for a worked example.
-- **Profile contents:** `manifest.yaml` (env vars, file COPYs, instructions destination, optional entrypoint overrides), `install.sh` (runs as the container user at overlay-build time), `run.sh` (bypass-permissions exec), `run-gated.sh` (optional permission-gated exec), `login.sh` (optional auth flow), `settings/` (files baked into the image), `instructions.md` (agent-specific fragment for the composed CLAUDE.md / AGENTS.md).
+- **Profile contents:** `manifest.yaml` (env vars, file COPYs, instructions destination, optional entrypoint overrides), `install.sh` (runs as the container user at overlay-build time), `run.sh` (bypass-permissions exec), `run-gated.sh` (optional permission-gated exec), `login.sh` (optional auth flow), `settings/` (files baked into the image), `volumes` in the manifest (paths that outlive the container: `scope: workspace`, the default, keeps one per container folder; `scope: repo` shares one across all worktrees of a repo), `instructions.md` (agent-specific fragment for the composed CLAUDE.md / AGENTS.md).
 
 The container's instruction file (e.g. `~/.claude/CLAUDE.md` for claude-code) is composed at build time from:
 
@@ -171,7 +174,7 @@ The container's instruction file (e.g. `~/.claude/CLAUDE.md` for claude-code) is
 
 Concatenated lexically into the path declared by the profile's `instructions_dst`.
 
-To switch agents, set `agent: <name>` in `.rp/config.yaml` and `rp destroy && rp run`.
+To switch agents, run `rp destroy` first, then set `agent: <name>` in `.rp/config.yaml` and `rp run`. The agent is part of the container name, so `rp recreate` can't switch it, and once the config names the new agent rp no longer finds the old container. `rp destroy` also removes the old agent's volumes. To keep both agents side by side, skip it.
 
 ---
 
@@ -227,23 +230,42 @@ rp run                        # first run builds the project image
 
 ### Constraints
 - **Debian/Ubuntu bases only** (v1). The rp overlay installs `fuse3` via `apt-get`, so Alpine, RHEL, Arch, distroless, etc. bases are rejected up front with a clear error pointing at ADR-0006. Good bases: `debian:trixie-slim`, `ubuntu:24.04`, `node:*-trixie`, `python:*-slim-trixie`. If you need Alpine-flavored tooling today, write a Debian-based `.rp/Dockerfile` that installs the equivalent packages via apt.
-- `.rp/config.yaml` recognised keys: `agent`, `image`, `build` (with `context`, `dockerfile`, `args`), `user`, `resources.memory`, `resources.cpus`, `fuse.cache`. Anything else parse-errors with line numbers.
+- `.rp/config.yaml` recognised keys: `agent`, `image`, `build` (with `context`, `dockerfile`, `args`), `user`, `strip_sudo`, `allow_sudo`, `resources.memory`, `resources.cpus`, `fuse.cache`, `plugins` (`marketplaces`, `install`), `host_files`, `host_keychain`, `host_aliases`, `host_path_aliases`. Anything else parse-errors with line numbers. `.rp.example/config.yaml` documents each one.
+
+### Personal settings: `config.local.yaml`
+`.rp/config.local.yaml` takes the same keys and sits on top of `config.yaml`. It's gitignored by the template, so it holds what's yours rather than the team's: credentials, dotfiles, plugins. Scalars in it win, lists are appended, and `resources`/`fuse` merge per key. See ADR-0017.
+
+```yaml
+# .rp/config.local.yaml
+host_files:                       # copied in at create time; nothing crosses by default
+  - src: ~/.gitconfig
+    dst: /home/{{user}}/.gitconfig
+host_keychain:                    # macOS Keychain entry → file in the container
+  - service: Claude Code-credentials
+    dst: /home/{{user}}/.claude/.credentials.json
+```
+
+### Sudo inside the container
+By default the build refuses a container user with any sudo grant, because sudo could unmount the shadow layer (ADR-0005). Two opt-ins exist for images that ship a sudo user:
+
+- `strip_sudo: true` removes the user's sudo grant during the build (ADR-0009).
+- `allow_sudo: true` keeps it, so `sudo apt-get install` works. The shadow layer is then no longer a security boundary: only the VM isolates the host. Use it only for trusted code on a single-user Mac (ADR-0018).
 
 ### Edit-config workflow
 Changes to `.rp/config.yaml` or to a profile take effect at container CREATE time. To pick up edits:
 
 ```bash
-rp destroy && rp run     # rebuilds the project image + reapplies config
+rp recreate     # rebuilds the project image if its inputs changed + reapplies config; keeps volumes
 ```
 
-`rp stop` + `rp start` is enough only for re-reading `.rp/shadow` rules (since rp-fuse re-reads them at every start). Anything that affects image composition (agent, image, build, user, resources) requires `destroy + create`.
+`rp stop` + `rp start` is enough only for re-reading the workspace's own `.rp/shadow` rules (since rp-fuse re-reads them at every start). Anything that affects the image or the create flags (image, build, user, resources, plugins, host files) needs `rp recreate`; `rp recreate --rebuild` also rebuilds the image from scratch when nothing changed, e.g. for a newer base image. Switching `agent` is the exception, see Agent profiles.
 
 ### Diagnosing FUSE issues
 Set `RP_DEBUG=1` in the host shell when creating the container to enable verbose FUSE logging inside rp-fuse, plus dumping the generated overlay Dockerfile to stderr:
 
 ```bash
 RP_DEBUG=1 rp create --name myname    # forwarded into the container as -e RP_DEBUG=1
-rp logs myname                  # the verbose stream
+rp logs --name myname           # the verbose stream
 ```
 
 ### Diagnosing OOM kills
@@ -266,13 +288,13 @@ resources:
   cpus: 4
 ```
 
-Then `rp destroy && rp create` (memory is a create-time flag).
+Then `rp recreate` (memory is a create-time flag).
 
 ---
 
 ## What happens inside the container
 
-- You run as the configured user (default `coder` uid 1000), **no sudo**. System packages must be added at image-build time (edit `Dockerfile` or your per-project `.rp/Dockerfile`, run `rp rebuild`).
+- You run as the configured user (default `coder` uid 1000), **no sudo**. System packages must be added at image-build time (edit your per-project `.rp/Dockerfile`, run `rp recreate`).
 - The workspace (host path, 1:1 inside the container) is a FUSE mount served by `rp-fuse`. Passthrough paths reach the host bind; shadowed paths live in a container-local store.
 - Toolchain comes from the project image; the agent comes from the configured profile. With the default image + claude-code profile that's: `git`, `curl`, `build-essential`, `claude` — no language runtime unless your `.rp/config.yaml` adds one.
 - Auth: per-agent. claude-code uses `rp login` (Anthropic subscription) or `ANTHROPIC_API_KEY`. Other profiles declare their own env vars in `manifest.env`.
@@ -360,13 +382,21 @@ rp-fuse/                 Go source: FUSE driver + lint + config parser + profile
 scripts/
   build-project-image.sh project-image overlay builder (called by _ensure / create)
   resolve-create-args.sh translates .rp/config.yaml + profile env into `container create` flags
+  resolve-recipe-ctx.sh  resolves the container, agent and user a recipe acts on
+  lib-identity.sh        container lookup by path, naming, workspace + repo keys
+  resolve-git-dirs.sh    git common dirs of linked worktrees, bound once per repo
+  resolve-shadow-fallback.sh  main checkout's shadow rules for worktrees without .rp/
+  resolve-volumes.sh     host dirs for the profile's volumes (workspace or repo scope)
+  seed-host-files.sh     host_files / host_keychain imports at create time
+  gc.sh                  rp gc: orphaned containers, volumes, unused images
+  migrate-legacy-volumes.sh  moves pre-worktree volumes on rp recreate
 agent.profiles/<name>/   built-in agent profile bundles (claude-code in v1)
 config/
   00-container.md        agent-agnostic container fundamentals (baked into rp-system)
   10-toolchain-default.md image toolchain table (baked into rp-default)
   rp-init.sh             PID 1: sets up the shadow boundary, execs rp-fuse
 docs/
-  adr/                   architecture decision records (ADR-0001..0007)
+  adr/                   architecture decision records
   agents/                config for matt-pocock-style engineering skills
 CONTEXT.md               domain vocabulary (Shadow, Project image, Agent profile, ...)
 .rp.example/             template for .rp/ (shadow + config.yaml)
@@ -380,8 +410,8 @@ See `CLAUDE.md` for the developer-facing summary and `CONTEXT.md` for the vocabu
 
 - `rp list` shows every container with the host folder it's anchored to. Run this if you forget which container goes with which project.
 - Moving a folder (`mv`, `git worktree move`) detaches it from its container, because the path is the container's identity. Destroy the old container from `rp list` with `rp destroy --name <name>`.
-- For one-off prompts: `rp run "what does this repo do?"` runs the agent with that prompt and exits.
-- Updating an API key: edit `.env` in the robo-pen repo or export the var in your shell. Existing containers carry the value baked in at create time — `rp destroy && rp run` to pick up a new value.
+- For one-off prompts: `rp run -- "what does this repo do?"` runs the agent with that prompt and exits.
+- Updating an API key: edit `.env` in the robo-pen repo or export the var in your shell. Existing containers carry the value baked in at create time — `rp recreate` to pick up a new value.
 
 ---
 

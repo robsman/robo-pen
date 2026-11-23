@@ -125,10 +125,10 @@
 # to match. See ADR-0016 for the build-time install model + why these
 # run at image build, not on every `rp create`.
 #
-# Changes take effect on the next `rp destroy && rp create` (rebuilds
-# the image with new plugins compiled in). Workspace plugin volumes
-# survive `rp destroy`; new plugins are merged in via the init-time
-# seed copy. Removing a plugin from this list does NOT remove it from
+# Changes take effect on the next `rp recreate` (rebuilds the image
+# with new plugins compiled in). Workspace plugin volumes survive
+# `rp recreate`; new plugins are merged in via the init-time seed
+# copy. Removing a plugin from this list does NOT remove it from
 # already-seeded volumes — use `rp purge` for a clean slate.
 #
 # IMPORTANT: the marketplace NAME in the install entry is the name the
@@ -156,7 +156,7 @@
 # want.
 #
 # Re-applied on every `rp create`. Workspace volume persists agent
-# writes across destroy+create UNLESS they target a path also in
+# writes across `rp recreate` UNLESS they target a path also in
 # host_files (which gets overwritten by the host copy).
 #
 # Missing host sources are logged + skipped (if_missing: skip).
